@@ -137,6 +137,13 @@ with st.sidebar:
         st.session_state.knowledge_table = st.text_input("知識庫資料表名稱", value=st.session_state.knowledge_table)
         llm_temperature = st.slider("AI 回答溫度", min_value=0.0, max_value=1.0, value=float(get_env_variable("LLM_TEMPERATURE", "0.3")), step=0.1)
         
+        # 添加記憶長度設置
+        if "memory_length" not in st.session_state:
+            st.session_state.memory_length = 5
+        memory_length = st.slider("對話記憶長度", min_value=1, max_value=10, value=st.session_state.memory_length, step=1)
+        if memory_length != st.session_state.memory_length:
+            st.session_state.memory_length = memory_length
+        
         # 輸入系統提示詞檔案名稱
         prompt_filename = st.text_input("系統提示詞檔案名稱", value=st.session_state.prompt_filename)
         if prompt_filename != st.session_state.prompt_filename:
@@ -367,6 +374,36 @@ st.markdown("""
     margin: 0;
     padding: 0;
 }
+
+/* 表格樣式 */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.9em;
+}
+
+th {
+    background-color: #f8f9fa;
+    color: #333;
+    font-weight: bold;
+    text-align: left;
+    padding: 10px;
+    border: 1px solid #e0e0e0;
+}
+
+td {
+    padding: 8px 10px;
+    border: 1px solid #e0e0e0;
+}
+
+tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+
+tr:hover {
+    background-color: #f1f3f4;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -440,26 +477,39 @@ if prompt:
         context = "\n".join([f"概念: {item['concept']}\n解釋: {item['explanation']}" for item in knowledge_points])
         
         prompt = f"""
-
         知識點:
         {context}
         
         原始問題: {query}
         核心問題: {core_question}
         
-        回答:"""
+        回答:
+        
+        
+        """
         
         # 獲取系統提示詞
         system_content = st.session_state.custom_prompt
+        
+        # 構建對話歷史，包含最近的對話
+        messages = [{"role": "system", "content": system_content}]
+        
+        # 添加歷史對話記錄（只保留最近的幾輪）
+        memory_limit = st.session_state.memory_length
+        recent_messages = st.session_state.messages[-2*memory_limit:] if len(st.session_state.messages) > 2*memory_limit else st.session_state.messages[:]
+        
+        # 添加歷史對話記錄
+        for msg in recent_messages:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+        
+        # 添加當前問題和上下文
+        messages.append({"role": "user", "content": prompt})
         
         # 生成回答
         try:
             response = client.chat.completions.create(
                 model=llm_model,  # 使用從環境變數讀取的模型
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": prompt}
-                ],
+                messages=messages,
                 temperature=llm_temperature
             )
             
@@ -473,14 +523,25 @@ if prompt:
         update_status("我正在努力生成回答...")
         try:
             # 獲取系統提示詞
-            system_content = st.session_state.custom_prompt or """你是一個謹慎、實事求是的助手。對於用戶的問題，如果你不確定答案或沒有足夠的信息，請坦率地表示「我沒有足夠的信息來回答這個問題」或「我不確定，需要更多資料才能給出準確回答」。避免猜測或提供可能不準確的信息。尤其對於特定人物、組織或專業領域的問題，如果你沒有確切資料，更應明確表示不知道，而不是提供可能的幻覺信息。"""
+            system_content = st.session_state.custom_prompt
+            
+            # 構建對話歷史，包含最近的對話
+            messages = [{"role": "system", "content": system_content}]
+            
+            # 添加歷史對話記錄（只保留最近的幾輪）
+            memory_limit = st.session_state.memory_length
+            recent_messages = st.session_state.messages[-2*memory_limit:] if len(st.session_state.messages) > 2*memory_limit else st.session_state.messages[:]
+            
+            # 添加歷史對話記錄
+            for msg in recent_messages:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+            
+            # 添加當前問題
+            messages.append({"role": "user", "content": query})
             
             response = client.chat.completions.create(
                 model=llm_model,  # 使用從環境變數讀取的模型
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": query}
-                ],
+                messages=messages,
                 temperature=llm_temperature
             )
             
