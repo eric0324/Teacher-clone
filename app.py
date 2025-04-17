@@ -31,7 +31,7 @@ def get_env_variable(key, default_value=""):
 st.set_page_config(page_title="數位分身系統", layout="wide", initial_sidebar_state="collapsed")
 
 # 載入數位分身提示詞
-def load_system_prompt(prompt_filename="frank.txt"):
+def load_system_prompt(prompt_filename="wang.txt"):
     """從 system_prompts 資料夾載入系統提示詞檔案"""
     prompt_folder = Path("system_prompts")
     prompt_file = prompt_folder / prompt_filename
@@ -104,7 +104,7 @@ if "use_persona" not in st.session_state:
     st.session_state.use_persona = False
 
 if "prompt_filename" not in st.session_state:
-    st.session_state.prompt_filename = "frank.txt"
+    st.session_state.prompt_filename = "wang.txt"
 
 if "knowledge_table" not in st.session_state:
     st.session_state.knowledge_table = get_env_variable("KNOWLEDGE_TABLE", "knowledge_base")  # 從環境變數讀取資料表名稱
