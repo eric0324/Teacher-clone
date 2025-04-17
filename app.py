@@ -120,7 +120,7 @@ openai_api_key = get_env_variable("OPENAI_API_KEY", "")
 client = OpenAI(api_key=openai_api_key)
 
 # 讀取環境變數中的模型名稱
-llm_model = get_env_variable("LLM_MODEL", "gpt-4o-mini")
+llm_model = get_env_variable("LLM_MODEL", "gpt-4o")
 
 # 側邊欄設置
 with st.sidebar:
@@ -320,70 +320,10 @@ def search_knowledge(query, match_threshold=0.7, match_count=6):
     except Exception as e:
         return []
 
-def get_default_system_prompt():
-    """獲取預設的 System Prompt"""
-    return """你是一個嚴格遵循提供知識的助手。你必須只使用提供的知識來回答問題，禁止添加、編造或推測任何未明確提供的信息。如果知識不足以回答問題，你必須明確表示無法回答或資料不足。避免任何形式的幻覺或虛構內容。"""
-
-def rag_response(query):
-    """使用RAG（檢索增強生成）模式回答問題"""
-    # 使用全局狀態顯示區域 - 但不要實際顯示狀態
-    # 所有狀態會在主聊天流程中使用這個返回值來顯示
-    current_status = "我正在理解你的問題..."
-    
-    # 步驟1: 使用LLM提取核心問題
-    core_result = extract_core_question_with_llm(query)
-    core_question = core_result.get("core_question", query)
-    st.session_state.last_core_question = core_question
-    st.session_state.last_keywords = core_result.get("keywords", [])
-    
-    # 步驟2: 檢索相關知識
-    current_status = "我懂你的問題了，我正在從知識庫尋找相關資訊..."
-    knowledge_points = search_knowledge(core_question)
-    st.session_state.last_knowledge_points = knowledge_points
-    
-    if not knowledge_points:
-        current_status = "找不到相關知識點"
-        return generate_direct_response(query), current_status
-    
-    # 步驟3: 構建包含檢索知識的提示
-    current_status = "我懂你的問題了，我正在基於找到的知識思考中..."
-    context = "\n".join([f"概念: {item['concept']}\n解釋: {item['explanation']}" for item in knowledge_points])
-    
-    prompt = f"""根據以下知識點和用戶的問題，提供一個準確、信息豐富的回答。
-    嚴格限制：只使用下面提供的知識內容回答，不要添加任何未提供的信息。
-    如果提供的知識不足以完整回答問題，請明確說明「根據提供的知識，無法回答這個問題」或「提供的資料中沒有這個信息」。
-    禁止任何形式的猜測或創造未提供的信息。
-
-    知識點:
-    {context}
-    
-    原始問題: {query}
-    核心問題: {core_question}
-    
-    回答:"""
-    
-    # 獲取系統提示詞
-    system_content = st.session_state.custom_prompt or get_default_system_prompt()
-    
-    # 步驟5: 生成回答
-    try:
-        response = client.chat.completions.create(
-            model=llm_model,  # 使用從環境變數讀取的模型
-            messages=[
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1  # 降低溫度以減少創造性
-        )
-        
-        return response.choices[0].message.content.strip(), current_status
-    except Exception as e:
-        current_status = f"生成回答時出錯: {str(e)}"
-        return f"生成回答時發生錯誤: {str(e)}", current_status
 
 def generate_direct_response(query):
     """當知識庫中沒有相關信息時，直接使用 OpenAI 回答"""
-    current_status = "正在使用OpenAI生成回答..."
+    current_status = "我正在努力生成回答..."
     
     try:
         # 獲取系統提示詞
@@ -440,7 +380,7 @@ for message in st.session_state.messages:
         st.write(message["content"])
 
 # 輸入框
-prompt = st.chat_input("輸入您的問題...")
+prompt = st.chat_input("請輸入您的問題...")
 
 # 處理用戶輸入
 if prompt:
@@ -482,27 +422,24 @@ if prompt:
     
     # 修改 RAG 函數來使用我們的狀態更新函數
     def rag_with_status(query):
-        update_status("正在使用LLM提取核心問題...")
+        update_status("我正在思考你的問題...")
         core_result = extract_core_question_with_llm(query)
         core_question = core_result.get("core_question", query)
         st.session_state.last_core_question = core_question
         st.session_state.last_keywords = core_result.get("keywords", [])
         
-        update_status("正在從知識庫檢索相關資訊...")
+        update_status("正在從知識庫尋找相關資訊...")
         knowledge_points = search_knowledge(core_question)
         st.session_state.last_knowledge_points = knowledge_points
         
         if not knowledge_points:
-            update_status("未找到相關知識點，將使用 OpenAI 直接回答")
+            update_status("好像沒有未找到相關知識點")
             return direct_with_status(query)
         
-        update_status("正在基於檢索到的知識生成回答...")
+        update_status("找到了相關資訊，正在生成回答...")
         context = "\n".join([f"概念: {item['concept']}\n解釋: {item['explanation']}" for item in knowledge_points])
         
-        prompt = f"""根據以下知識點和用戶的問題，提供一個準確、信息豐富的回答。
-        嚴格限制：只使用下面提供的知識內容回答，不要添加任何未提供的信息。
-        如果提供的知識不足以完整回答問題，請明確說明「根據提供的知識，無法回答這個問題」或「提供的資料中沒有這個信息」。
-        禁止任何形式的猜測或創造未提供的信息。
+        prompt = f"""
 
         知識點:
         {context}
@@ -513,7 +450,7 @@ if prompt:
         回答:"""
         
         # 獲取系統提示詞
-        system_content = st.session_state.custom_prompt or get_default_system_prompt()
+        system_content = st.session_state.custom_prompt
         
         # 生成回答
         try:
@@ -523,7 +460,7 @@ if prompt:
                     {"role": "system", "content": system_content},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1  # 降低溫度以減少創造性
+                temperature=llm_temperature
             )
             
             return response.choices[0].message.content.strip()
@@ -533,7 +470,7 @@ if prompt:
     
     # 直接回答的函數，帶狀態更新
     def direct_with_status(query):
-        update_status("正在使用OpenAI生成回答...")
+        update_status("我正在努力生成回答...")
         try:
             # 獲取系統提示詞
             system_content = st.session_state.custom_prompt or """你是一個謹慎、實事求是的助手。對於用戶的問題，如果你不確定答案或沒有足夠的信息，請坦率地表示「我沒有足夠的信息來回答這個問題」或「我不確定，需要更多資料才能給出準確回答」。避免猜測或提供可能不準確的信息。尤其對於特定人物、組織或專業領域的問題，如果你沒有確切資料，更應明確表示不知道，而不是提供可能的幻覺信息。"""
