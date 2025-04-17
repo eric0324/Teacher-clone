@@ -328,7 +328,7 @@ def rag_response(query):
     """使用RAG（檢索增強生成）模式回答問題"""
     # 使用全局狀態顯示區域 - 但不要實際顯示狀態
     # 所有狀態會在主聊天流程中使用這個返回值來顯示
-    current_status = "正在使用LLM提取核心問題..."
+    current_status = "我正在理解你的問題..."
     
     # 步驟1: 使用LLM提取核心問題
     core_result = extract_core_question_with_llm(query)
@@ -337,16 +337,16 @@ def rag_response(query):
     st.session_state.last_keywords = core_result.get("keywords", [])
     
     # 步驟2: 檢索相關知識
-    current_status = "正在從知識庫檢索相關資訊..."
+    current_status = "我懂你的問題了，我正在從知識庫尋找相關資訊..."
     knowledge_points = search_knowledge(core_question)
     st.session_state.last_knowledge_points = knowledge_points
     
     if not knowledge_points:
-        current_status = "未找到相關知識點，將使用 OpenAI 直接回答"
+        current_status = "找不到相關知識點"
         return generate_direct_response(query), current_status
     
     # 步驟3: 構建包含檢索知識的提示
-    current_status = "正在基於檢索到的知識生成回答..."
+    current_status = "我懂你的問題了，我正在基於找到的知識思考中..."
     context = "\n".join([f"概念: {item['concept']}\n解釋: {item['explanation']}" for item in knowledge_points])
     
     prompt = f"""根據以下知識點和用戶的問題，提供一個準確、信息豐富的回答。
