@@ -2,16 +2,11 @@ streamlit==1.36.0
 langchain==0.1.11
 langchain-openai==0.1.5
 langchain-community==0.0.25
-# faiss 相關套件暫時註釋掉 - 請選擇以下其中一種方式安裝:
-# 選項 1: 原始版本 (需要 SWIG 工具)
-# faiss-cpu==1.7.4
-# 選項 2: 嘗試較低版本
-# faiss-cpu==1.7.0
-# 選項 3: 使用 conda 安裝: conda install -c conda-forge faiss-cpu
-# 選項 4: 完全不使用 faiss (如果不是必需的)
 openai==1.16.1
 pypdf==4.1.0
 python-dotenv==1.0.1
-# 降級 Supabase 版本以解決 proxy 參數問題
 supabase==1.0.3
 requests==2.31.0 
+boto3==1.35.0
+streamlit-chat==0.1.1
+streamlit-extras==0.2.1

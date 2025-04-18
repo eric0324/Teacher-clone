@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-import sys
 from pathlib import Path
 import re
 import json
@@ -9,6 +8,8 @@ from supabase import create_client, Client
 from openai import OpenAI
 from dotenv import load_dotenv
 import time  # 添加time模組用於打字效果
+import boto3  # 添加 boto3 用於 AWS 服務
+import botocore.exceptions  # 用於處理 AWS 異常
 
 # 載入環境變數
 load_dotenv()
@@ -109,6 +110,9 @@ if "prompt_filename" not in st.session_state:
 if "knowledge_table" not in st.session_state:
     st.session_state.knowledge_table = get_env_variable("KNOWLEDGE_TABLE", "knowledge_base")  # 從環境變數讀取資料表名稱
 
+if "llm_provider" not in st.session_state:
+    st.session_state.llm_provider = "bedrock"  # 預設使用 Bedrock
+
 # 載入數位分身提示詞
 if "custom_prompt" not in st.session_state:
     st.session_state.custom_prompt = load_system_prompt(st.session_state.prompt_filename)
@@ -122,6 +126,29 @@ client = OpenAI(api_key=openai_api_key)
 # 讀取環境變數中的模型名稱
 llm_model = get_env_variable("LLM_MODEL", "gpt-4o")
 
+# DeepSeek 設定
+deepseek_api_key = get_env_variable("DEEPSEEK_API_KEY", "")
+deepseek_model = get_env_variable("DEEPSEEK_MODEL", "deepseek-chat")
+
+# Amazon Bedrock 設定
+aws_region = get_env_variable("AWS_REGION", "us-east-1")
+aws_access_key = get_env_variable("AWS_ACCESS_KEY_ID", "")
+aws_secret_key = get_env_variable("AWS_SECRET_ACCESS_KEY", "")
+bedrock_model_id = get_env_variable("BEDROCK_MODEL_ID", "amazon.titan-text-express-v1")  # 修改為更常用的模型
+
+# 初始化 Bedrock 客戶端
+bedrock_runtime = None
+if aws_access_key and aws_secret_key:
+    try:
+        bedrock_runtime = boto3.client(
+            service_name="bedrock-runtime",
+            region_name=aws_region,
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key
+        )
+    except Exception as e:
+        st.error(f"初始化 Bedrock 客戶端時出錯: {str(e)}")
+
 # 側邊欄設置
 with st.sidebar:
     st.header("設置")
@@ -131,6 +158,46 @@ with st.sidebar:
     supabase_key = get_env_variable("SUPABASE_KEY", "")
     voyage_api_key = get_env_variable("VOYAGE_API_KEY", "")
     voyage_model = get_env_variable("VOYAGE_MODEL", "voyage-2")
+    
+    # LLM 供應商選擇
+    llm_provider_options = ["openai", "bedrock", "deepseek"]
+    selected_provider = st.selectbox(
+        "選擇大語言模型供應商", 
+        llm_provider_options,
+        index=llm_provider_options.index(st.session_state.llm_provider)
+    )
+    
+    if selected_provider != st.session_state.llm_provider:
+        st.session_state.llm_provider = selected_provider
+        st.success(f"已切換到 {selected_provider} 模型")
+    
+    # 根據供應商顯示對應的模型選擇
+    if st.session_state.llm_provider == "openai":
+        openai_models = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
+        selected_openai_model = st.selectbox("選擇 OpenAI 模型", openai_models, index=openai_models.index(llm_model) if llm_model in openai_models else 0)
+        if selected_openai_model != llm_model:
+            llm_model = selected_openai_model
+    elif st.session_state.llm_provider == "bedrock":
+        bedrock_models = [
+            "amazon.titan-text-express-v1",
+            "amazon.titan-text-lite-v1",
+            "anthropic.claude-3-5-sonnet-20240620-v1:0",
+            "anthropic.claude-3-haiku-20240307-v1:0",
+            "meta.llama2-13b-chat-v1",
+        ]
+        selected_bedrock_model = st.selectbox(
+            "選擇 Amazon Bedrock 模型", 
+            bedrock_models, 
+            index=bedrock_models.index(bedrock_model_id) if bedrock_model_id in bedrock_models else 0
+        )
+        if selected_bedrock_model != bedrock_model_id:
+            bedrock_model_id = selected_bedrock_model
+    elif st.session_state.llm_provider == "deepseek":
+        # DeepSeek 模型選擇
+        deepseek_models = ["deepseek-chat"]
+        selected_deepseek_model = st.selectbox("選擇 DeepSeek 模型", deepseek_models, index=deepseek_models.index(deepseek_model) if deepseek_model in deepseek_models else 0)
+        if selected_deepseek_model != deepseek_model:
+            deepseek_model = selected_deepseek_model
     
     # 進階設置
     with st.expander("進階設置"):
@@ -327,25 +394,321 @@ def search_knowledge(query, match_threshold=0.7, match_count=6):
     except Exception as e:
         return []
 
+# 使用 Amazon Bedrock 生成回答
+def generate_bedrock_response(messages, model_id):
+    """使用 Amazon Bedrock 生成回答"""
+    if not bedrock_runtime:
+        return "Amazon Bedrock 未正確配置，請確認您已設定 AWS 憑證。", "配置錯誤"
+    
+    try:
+        # 確認是 Anthropic Claude 模型還是其他模型
+        if "anthropic.claude" in model_id.lower():
+            # 處理 Claude 格式的提示
+            prompt = {"anthropic_version": "bedrock-2023-05-31"}
+            
+            # 處理系統提示
+            system_message = next((msg for msg in messages if msg["role"] == "system"), None)
+            if system_message:
+                prompt["system"] = system_message["content"]
+                # 從消息列表中移除系統消息
+                messages = [msg for msg in messages if msg["role"] != "system"]
+            
+            # 處理對話
+            prompt["messages"] = []
+            for msg in messages:
+                role = "user" if msg["role"] == "user" else "assistant"
+                prompt["messages"].append({"role": role, "content": msg["content"]})
+            
+            # 為 Claude 3.5 模型添加必要的 max_tokens 參數
+            if "claude-3-5" in model_id.lower():
+                prompt["max_tokens"] = 2048
+            
+            response = bedrock_runtime.invoke_model(
+                modelId=model_id,
+                body=json.dumps(prompt)
+            )
+            response_body = json.loads(response.get("body").read())
+            return response_body.get("content")[0].get("text"), "成功"
+        
+        # 處理 Meta Llama 模型
+        elif "meta.llama" in model_id.lower():
+            # Llama 使用不同的格式
+            system_message = next((msg for msg in messages if msg["role"] == "system"), None)
+            system_content = system_message["content"] if system_message else ""
+            
+            # 格式化對話
+            prompt = ""
+            if system_content:
+                prompt += f"<system>\n{system_content}\n</system>\n\n"
+            
+            for msg in messages:
+                if msg["role"] == "system":
+                    continue
+                if msg["role"] == "user":
+                    prompt += f"<human>\n{msg['content']}\n</human>\n\n"
+                elif msg["role"] == "assistant":
+                    prompt += f"<assistant>\n{msg['content']}\n</assistant>\n\n"
+            
+            # 添加最後的助手角色標籤
+            prompt += "<assistant>\n"
+            
+            response = bedrock_runtime.invoke_model(
+                modelId=model_id,
+                body=json.dumps({
+                    "prompt": prompt,
+                    "temperature": llm_temperature,
+                    "max_gen_len": 2048
+                })
+            )
+            response_body = json.loads(response.get("body").read())
+            return response_body.get("generation"), "成功"
+        
+        # 處理 Mistral 模型
+        elif "mistral." in model_id.lower():
+            # Mistral 使用不同的格式
+            prompt = ""
+            for msg in messages:
+                if msg["role"] == "system":
+                    prompt += f"<s>[INST] {msg['content']} [/INST]</s>\n"
+                elif msg["role"] == "user":
+                    prompt += f"<s>[INST] {msg['content']} [/INST]</s>\n"
+                elif msg["role"] == "assistant":
+                    prompt += f"<s>{msg['content']}</s>\n"
+            
+            response = bedrock_runtime.invoke_model(
+                modelId=model_id,
+                body=json.dumps({
+                    "prompt": prompt,
+                    "temperature": llm_temperature,
+                    "max_tokens": 2048
+                })
+            )
+            response_body = json.loads(response.get("body").read())
+            return response_body.get("outputs")[0].get("text"), "成功"
+        
+        # 處理 DeepSeek-R1 模型
+        elif "deepseek.r1" in model_id.lower():
+            # 處理系統提示
+            system_message = next((msg for msg in messages if msg["role"] == "system"), None)
+            
+            # 格式化用戶查詢
+            user_messages = [msg for msg in messages if msg["role"] == "user"]
+            user_content = user_messages[-1]["content"] if user_messages else ""
+            
+            # 使用 DeepSeek-R1 的特定格式封裝提示詞，確保沒有多餘空格
+            prompt_text = f"<｜begin_of_sentence｜> {user_content} <｜Assistant｜><think>\n"
+            
+            response = bedrock_runtime.invoke_model(
+                modelId=model_id,
+                body=json.dumps({
+                    "prompt": prompt_text,
+                    "max_tokens": 2048,
+                    "temperature": llm_temperature,
+                    "top_p": 0.9
+                })
+            )
+            response_body = json.loads(response.get("body").read())
+            
+            if "choices" in response_body and len(response_body["choices"]) > 0:
+                return response_body["choices"][0]["text"], "成功"
+            else:
+                return "無法從 DeepSeek 模型獲取回應", "回應解析錯誤"
+        
+        # 處理 Amazon Nova Pro 模型
+        elif "amazon.nova-pro" in model_id.lower():
+            # 組合所有消息
+            complete_prompt = ""
+            system_message = next((msg for msg in messages if msg["role"] == "system"), None)
+            
+            # 如果有系統提示，先加到提示詞
+            if system_message:
+                complete_prompt += f"{system_message['content']}\n\n"
+            
+            # 按照對話順序添加用戶和助手的消息
+            for msg in messages:
+                if msg["role"] == "system":
+                    continue
+                if msg["role"] == "user":
+                    complete_prompt += f"Human: {msg['content']}\n"
+                elif msg["role"] == "assistant":
+                    complete_prompt += f"Assistant: {msg['content']}\n"
+            
+            # 添加最後的助手標記
+            complete_prompt += "Assistant: "
+            
+            response = bedrock_runtime.invoke_model(
+                modelId=model_id,
+                body=json.dumps({
+                    "inputText": complete_prompt,
+                    "textGenerationConfig": {
+                        "temperature": llm_temperature,
+                        "maxTokenCount": 2048,
+                        "topP": 0.9,
+                        "stopSequences": []
+                    }
+                })
+            )
+            response_body = json.loads(response.get("body").read())
+            
+            if "results" in response_body and len(response_body["results"]) > 0:
+                return response_body["results"][0]["outputText"], "成功"
+            else:
+                return "無法從 Nova Pro 模型獲取回應", "回應解析錯誤"
+        
+        # 處理 Amazon Titan 模型
+        elif "amazon.titan" in model_id.lower():
+            # 先獲取系統消息
+            system_message = next((msg for msg in messages if msg["role"] == "system"), None)
+            system_content = system_message["content"] if system_message else ""
+            
+            # 組合所有消息
+            combined_messages = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    continue  # 系統消息將在下面處理
+                if msg["role"] == "user":
+                    combined_messages.append({"role": "user", "content": msg["content"]})
+                elif msg["role"] == "assistant":
+                    combined_messages.append({"role": "assistant", "content": msg["content"]})
+            
+            # 創建 Titan 模型的請求體
+            body = {
+                "inputText": system_content + "\n\n" + "\n".join([f"{m['role']}: {m['content']}" for m in combined_messages]) + "\nassistant:",
+                "textGenerationConfig": {
+                    "maxTokenCount": 1024,
+                    "temperature": llm_temperature,
+                    "topP": 0.9
+                }
+            }
+            
+            response = bedrock_runtime.invoke_model(
+                modelId=model_id,
+                body=json.dumps(body)
+            )
+            response_body = json.loads(response.get("body").read())
+            return response_body.get("results")[0].get("outputText"), "成功"
+        
+        else:
+            return f"不支援的模型: {model_id}", "模型不支援"
+            
+    except botocore.exceptions.ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        error_message = e.response.get("Error", {}).get("Message", str(e))
+        if error_code == "AccessDeniedException":
+            return f"存取被拒絕: {error_message}", "存取被拒絕"
+        elif error_code == "ValidationException":
+            return f"驗證錯誤: {error_message}", "驗證錯誤"
+        elif error_code == "ModelTimeoutException":
+            return "模型處理逾時，請嘗試較短的問題。", "處理逾時"
+        else:
+            return f"Bedrock 呼叫錯誤: {error_code} - {error_message}", f"錯誤: {error_code}"
+    except Exception as e:
+        return f"生成回答時發生錯誤: {str(e)}", "處理錯誤"
+
+# 使用 DeepSeek API 生成回答
+def generate_deepseek_response(messages, model_id):
+    """直接使用 DeepSeek API 生成回答，而不是通過 Bedrock"""
+    if not deepseek_api_key:
+        return "DeepSeek API 未正確配置，請確認您已設定 API 密鑰。", "配置錯誤"
+    
+    try:
+        # 構建請求頭和請求體
+        headers = {
+            "Authorization": f"Bearer {deepseek_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # 處理系統提示
+        system_message = next((msg for msg in messages if msg["role"] == "system"), None)
+        system_content = system_message["content"] if system_message else ""
+        
+        # 構建訊息格式
+        formatted_messages = []
+        for msg in messages:
+            if msg["role"] == "system":
+                continue  # 系統消息將單獨處理
+            formatted_messages.append({
+                "role": msg["role"],
+                "content": msg["content"]
+            })
+        
+        # 構建請求體
+        payload = {
+            "model": model_id,
+            "messages": formatted_messages,
+            "temperature": llm_temperature,
+            "max_tokens": 2048
+        }
+        
+        if system_content:
+            payload["system"] = system_content
+        
+        # 發送請求到 DeepSeek API
+        response = requests.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            headers=headers,
+            json=payload
+        )
+        
+        # 檢查響應狀態
+        response.raise_for_status()
+        result = response.json()
+        
+        # 從響應中提取回答
+        if "choices" in result and len(result["choices"]) > 0:
+            return result["choices"][0]["message"]["content"], "成功"
+        else:
+            return "無法從 DeepSeek 獲取回應", "回應解析錯誤"
+            
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code
+        error_message = e.response.text
+        return f"DeepSeek API 錯誤 ({status_code}): {error_message}", f"HTTP錯誤: {status_code}"
+    except requests.exceptions.RequestException as e:
+        return f"請求 DeepSeek API 時發生錯誤: {str(e)}", "請求錯誤"
+    except Exception as e:
+        return f"生成回答時發生錯誤: {str(e)}", "處理錯誤"
 
 def generate_direct_response(query):
-    """當知識庫中沒有相關信息時，直接使用 OpenAI 回答"""
+    """當知識庫中沒有相關信息時，直接使用 AI 模型回答"""
     current_status = "我正在努力生成回答..."
     
     try:
         # 獲取系統提示詞
         system_content = st.session_state.custom_prompt or """你是一個謹慎、實事求是的助手。對於用戶的問題，如果你不確定答案或沒有足夠的信息，請坦率地表示「我沒有足夠的信息來回答這個問題」或「我不確定，需要更多資料才能給出準確回答」。避免猜測或提供可能不準確的信息。尤其對於特定人物、組織或專業領域的問題，如果你沒有確切資料，更應明確表示不知道，而不是提供可能的幻覺信息。"""
         
-        response = client.chat.completions.create(
-            model=llm_model,  # 使用從環境變數讀取的模型
-            messages=[
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": query}
-            ],
-            temperature=llm_temperature
-        )
-        
-        return response.choices[0].message.content.strip(), current_status
+        # 根據供應商選擇不同的實現
+        if st.session_state.llm_provider == "openai":
+            response = client.chat.completions.create(
+                model=llm_model,  # 使用從環境變數讀取的模型
+                messages=[
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": query}
+                ],
+                temperature=llm_temperature
+            )
+            return response.choices[0].message.content.strip(), current_status
+        elif st.session_state.llm_provider == "bedrock":
+            response_text, status = generate_bedrock_response(
+                messages=[
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": query}
+                ],
+                model_id=bedrock_model_id
+            )
+            return response_text, current_status
+        elif st.session_state.llm_provider == "deepseek":
+            # DeepSeek 實現
+            response_text, status = generate_deepseek_response(
+                messages=[
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": query}
+                ],
+                model_id=deepseek_model
+            )
+            return response_text, current_status
+        else:
+            return "未支援的 LLM 供應商", "配置錯誤"
     except Exception as e:
         current_status = f"生成直接回答時出錯: {str(e)}"
         return f"生成回答時發生錯誤: {str(e)}", current_status
@@ -435,12 +798,32 @@ if prompt:
     status_msg = st.empty()
     
     # 檢查必要的API金鑰是否設置
-    if not openai_api_key:
+    api_check_passed = False
+    if st.session_state.llm_provider == "openai" and not openai_api_key:
         with st.chat_message("assistant"):
             st.error("請設置 OpenAI API Key 才能使用對話功能。")
         st.info("如何設置API金鑰: \n\n"
                 "本地開發: 在專案根目錄創建.env檔案，然後添加 `OPENAI_API_KEY=your_key`\n\n"
                 "Streamlit Cloud: 在應用程式設置中添加密鑰，設置名稱為 `OPENAI_API_KEY`")
+    elif st.session_state.llm_provider == "bedrock" and (not aws_access_key or not aws_secret_key):
+        with st.chat_message("assistant"):
+            st.error("請設置 AWS 憑證才能使用 Amazon Bedrock。")
+        st.info("如何設置 AWS 憑證: \n\n"
+                "本地開發: 在專案根目錄創建.env檔案，然後添加:\n"
+                "`AWS_ACCESS_KEY_ID=your_access_key`\n"
+                "`AWS_SECRET_ACCESS_KEY=your_secret_key`\n"
+                "`AWS_REGION=your_region`\n\n"
+                "Streamlit Cloud: 在應用程式設置中添加上述密鑰")
+    elif st.session_state.llm_provider == "deepseek" and not deepseek_api_key:
+        with st.chat_message("assistant"):
+            st.error("請設置 DeepSeek API Key 才能使用 DeepSeek 模型。")
+        st.info("如何設置 DeepSeek API Key: \n\n"
+                "本地開發: 在專案根目錄創建.env檔案，然後添加 `DEEPSEEK_API_KEY=your_key`\n\n"
+                "Streamlit Cloud: 在應用程式設置中添加密鑰，設置名稱為 `DEEPSEEK_API_KEY`")
+    else:
+        api_check_passed = True
+    
+    if not api_check_passed:
         st.stop()  # 如果沒有設置API金鑰，停止執行
     
     # 更新狀態訊息函數 - 只在一個位置更新
@@ -507,13 +890,27 @@ if prompt:
         
         # 生成回答
         try:
-            response = client.chat.completions.create(
-                model=llm_model,  # 使用從環境變數讀取的模型
-                messages=messages,
-                temperature=llm_temperature
-            )
-            
-            return response.choices[0].message.content.strip()
+            if st.session_state.llm_provider == "openai":
+                response = client.chat.completions.create(
+                    model=llm_model,  # 使用從環境變數讀取的模型
+                    messages=messages,
+                    temperature=llm_temperature
+                )
+                return response.choices[0].message.content.strip()
+            elif st.session_state.llm_provider == "bedrock":
+                response_text, status = generate_bedrock_response(
+                    messages=messages,
+                    model_id=bedrock_model_id
+                )
+                return response_text
+            elif st.session_state.llm_provider == "deepseek":
+                response_text, status = generate_deepseek_response(
+                    messages=messages,
+                    model_id=deepseek_model
+                )
+                return response_text
+            else:
+                return "未支援的 LLM 供應商"
         except Exception as e:
             update_status(f"生成回答時出錯: {str(e)}")
             return f"生成回答時發生錯誤: {str(e)}"
@@ -539,13 +936,28 @@ if prompt:
             # 添加當前問題
             messages.append({"role": "user", "content": query})
             
-            response = client.chat.completions.create(
-                model=llm_model,  # 使用從環境變數讀取的模型
-                messages=messages,
-                temperature=llm_temperature
-            )
-            
-            return response.choices[0].message.content.strip()
+            # 根據供應商選擇不同的實現
+            if st.session_state.llm_provider == "openai":
+                response = client.chat.completions.create(
+                    model=llm_model,  # 使用從環境變數讀取的模型
+                    messages=messages,
+                    temperature=llm_temperature
+                )
+                return response.choices[0].message.content.strip()
+            elif st.session_state.llm_provider == "bedrock":
+                response_text, status = generate_bedrock_response(
+                    messages=messages,
+                    model_id=bedrock_model_id
+                )
+                return response_text
+            elif st.session_state.llm_provider == "deepseek":
+                response_text, status = generate_deepseek_response(
+                    messages=messages,
+                    model_id=deepseek_model
+                )
+                return response_text
+            else:
+                return "未支援的 LLM 供應商"
         except Exception as e:
             update_status(f"生成直接回答時出錯: {str(e)}")
             return f"生成回答時發生錯誤: {str(e)}"
