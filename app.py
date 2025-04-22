@@ -111,7 +111,10 @@ if "knowledge_table" not in st.session_state:
     st.session_state.knowledge_table = get_env_variable("KNOWLEDGE_TABLE", "knowledge_base")  # 從環境變數讀取資料表名稱
 
 if "llm_provider" not in st.session_state:
-    st.session_state.llm_provider = "bedrock"  # 預設使用 Bedrock
+    st.session_state.llm_provider = "deepseek"  # 預設使用 Bedrock
+
+if "use_streaming" not in st.session_state:
+    st.session_state.use_streaming = True  # 預設啟用串流回應
 
 # 載入數位分身提示詞
 if "custom_prompt" not in st.session_state:
@@ -160,7 +163,7 @@ with st.sidebar:
     voyage_model = get_env_variable("VOYAGE_MODEL", "voyage-2")
     
     # LLM 供應商選擇
-    llm_provider_options = ["openai", "bedrock", "deepseek"]
+    llm_provider_options = ["deepseek", "bedrock", "openai", ]
     selected_provider = st.selectbox(
         "選擇大語言模型供應商", 
         llm_provider_options,
@@ -171,6 +174,13 @@ with st.sidebar:
         st.session_state.llm_provider = selected_provider
         st.success(f"已切換到 {selected_provider} 模型")
     
+    # 串流模式設置
+    streaming_enabled = st.toggle("啟用串流模式", st.session_state.use_streaming, 
+                                help="啟用串流模式後，回答將逐步顯示，不必等待完整回答生成。")
+    if streaming_enabled != st.session_state.use_streaming:
+        st.session_state.use_streaming = streaming_enabled
+        st.success("串流模式設定已更新")
+    
     # 根據供應商顯示對應的模型選擇
     if st.session_state.llm_provider == "openai":
         openai_models = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
@@ -179,11 +189,8 @@ with st.sidebar:
             llm_model = selected_openai_model
     elif st.session_state.llm_provider == "bedrock":
         bedrock_models = [
-            "amazon.titan-text-express-v1",
-            "amazon.titan-text-lite-v1",
             "anthropic.claude-3-5-sonnet-20240620-v1:0",
             "anthropic.claude-3-haiku-20240307-v1:0",
-            "meta.llama2-13b-chat-v1",
         ]
         selected_bedrock_model = st.selectbox(
             "選擇 Amazon Bedrock 模型", 
@@ -256,18 +263,19 @@ def generate_embeddings(text):
         return None
 
 def extract_keywords(query):
-    """從查詢中提取可能的關鍵詞"""
+    """從查詢中提取可能的關鍵詞，改進版"""
     # 常見的問句開頭和修飾詞，可能會干擾精確配斷
     stopwords = [
         '想知道', '請問', '告訴我', '關於', '誰是', '是誰', '什麼是', '的', '是',
         '嗎', '呢', '啊', '吧', '了', '哦', '喔', '耶', '呀', '？', '?',
-        '請', '幫我', '可以', '能', '應該', '會', '要', '需要'
+        '請', '幫我', '可以', '能', '應該', '會', '要', '需要', '如何', '怎麼',
+        '為什麼', '為何', '怎樣', '有沒有', '有什麼', '有哪些', '還有', '跟', '和', '與'
     ]
     
     # 清理標點符號和特殊字符
     cleaned_query = re.sub(r'[^\w\s]', ' ', query)
     
-    # 移除停用詞
+    # 先移除常見停用詞
     for word in stopwords:
         cleaned_query = cleaned_query.replace(word, ' ')
     
@@ -276,26 +284,54 @@ def extract_keywords(query):
     seen = set()  # 用於去重
     for k in cleaned_query.split():
         k = k.strip()
-        if k and k not in seen:
+        if k and k not in seen and len(k) >= 2:  # 至少要有兩個字符
             keywords.append(k)
             seen.add(k)
+    
+    # 提取特殊專有名詞 - 用正則表達式識別可能的專有名詞
+    potential_entities = re.findall(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*|[A-Z]{2,}', query)
+    for entity in potential_entities:
+        if entity.lower() not in [k.lower() for k in keywords]:
+            keywords.append(entity)
+    
+    # 如果沒有找到任何關鍵詞，使用分詞方式再試一次，但保留較長的詞
+    if not keywords:
+        words = re.findall(r'\w+', query)
+        for word in words:
+            if len(word) >= 3 and word not in stopwords:
+                keywords.append(word)
+    
+    # 產生雙詞組合
+    original_keywords = keywords.copy()
+    if len(original_keywords) >= 2:
+        for i in range(len(original_keywords) - 1):
+            combined = f"{original_keywords[i]}{original_keywords[i+1]}"
+            if combined not in keywords:
+                keywords.append(combined)
     
     return keywords
 
 def extract_core_question_with_llm(query):
-    """使用LLM提取查詢的核心問題和關鍵詞"""
+    """使用LLM提取查詢的核心問題和關鍵詞，增強版"""
     try:
-        system_prompt = """你是一個專業的文本分析工具。
-        你的任務是從用戶的問題中提取核心問題和關鍵詞。
-        請分析用戶的問題，去除禮貌用語、修飾詞和冗餘內容，
-        只保留能表達核心意思的最少詞語。
+        system_prompt = """你是一個專業的文本分析和關鍵詞提取專家。
+        你的任務是從用戶的問題中提取最核心的問題和關鍵詞。
         
-        請以JSON格式返回結果，包含兩個字段：
-        1. core_question: 精簡後的核心問題
-        2. keywords: 關鍵詞列表
+        請遵循這些規則：
+        1. 移除所有禮貌用語、修飾詞和冗餘內容
+        2. 保留專有名詞和技術術語的完整形式
+        3. 提取可以用於搜索的有效關鍵詞，不要包含太常見或無意義的詞語
+        4. 為了提高召回率，同時提供同義詞或相關詞
+        5. 識別查詢中的核心意圖和主題
+        
+        請以JSON格式返回結果，包含以下字段：
+        1. core_question: 精簡後的核心問題（主要查詢意圖）
+        2. keywords: 主要關鍵詞列表（按重要性排序）
+        3. synonyms: 關鍵詞的同義詞或相關詞（擴展查詢範圍用）
+        4. entity_types: 識別出的實體類型（如：產品、人名、技術、概念等）
         """
         
-        user_prompt = f"請分析這個問題並提取核心問題和關鍵詞：{query}"
+        user_prompt = f"請分析這個問題並提取核心問題和關鍵詞資訊：{query}"
         
         # 使用單獨的環境變數來設置核心提取器的模型
         core_extractor_model = get_env_variable("CORE_EXTRACTOR_MODEL", "gpt-3.5-turbo")
@@ -313,6 +349,15 @@ def extract_core_question_with_llm(query):
         result = response.choices[0].message.content
         parsed_result = json.loads(result)
         
+        # 確保回傳結果至少包含基本字段
+        if 'keywords' not in parsed_result:
+            parsed_result['keywords'] = extract_keywords(query)
+        
+        if 'synonyms' in parsed_result:
+            # 添加同義詞到關鍵詞列表，擴大搜索範圍
+            parsed_result['keywords'].extend([syn for syn in parsed_result['synonyms'] 
+                                             if syn not in parsed_result['keywords']])
+        
         return parsed_result
     except Exception as e:
         st.error(f"使用LLM提取核心問題時出錯: {str(e)}")
@@ -323,41 +368,137 @@ def extract_core_question_with_llm(query):
             "keywords": fallback_keywords
         }
 
-def search_knowledge(query, match_threshold=0.7, match_count=6):
-    """從向量知識庫中搜索相關的知識點"""
+def search_knowledge(query, match_threshold=0.7, match_count=10):
+    """從向量知識庫中搜索相關的知識點，使用多種策略提高命中率"""
     # 不再直接顯示狀態訊息，只處理搜索邏輯
     
     if not supabase:
         return []
-        
-    # 生成查詢的嵌入向量
-    query_embedding = generate_embeddings(query)
+    
+    # 提取核心問題和關鍵詞，增加搜索效果
+    core_result = extract_core_question_with_llm(query)
+    core_question = core_result.get("core_question", query)
+    all_keywords = core_result.get("keywords", extract_keywords(query))
+    
+    # 生成查詢的嵌入向量 - 核心問題比原始問題更能捕捉語義
+    query_embedding = generate_embeddings(core_question)
     
     if not query_embedding:
         return []
     
     try:
+        all_results = []  # 存儲所有匹配結果
+        
         # 1. 首先嘗試直接檢查是否有完全配對的關鍵詞
-        exact_result = supabase.table(st.session_state.knowledge_table).select("*").ilike("concept", f"%{query}%").execute()
+        # 增加在concept和explanation欄位中搜索
+        concept_query = f"%{query}%"
+        explanation_query = f"%{query}%"
+        
+        # 修正filter方法，使用正確的參數格式
+        exact_result = supabase.table(st.session_state.knowledge_table).select("*").ilike("concept", concept_query).execute()
+        
+        # 合併結果
         if hasattr(exact_result, 'data') and exact_result.data:
-            # 添加一個相似度欄位以與向量搜索結果格式一致
+            # 添加相似度欄位以與向量搜索結果格式一致
             for item in exact_result.data:
                 item['similarity'] = 1.0  # 設定為最高相似度
-            return exact_result.data
+                item['match_type'] = "概念完全匹配"  # 標記匹配類型
+            all_results.extend(exact_result.data)
+        
+        # 嘗試在解釋欄位中搜索
+        exp_result = supabase.table(st.session_state.knowledge_table).select("*").ilike("explanation", explanation_query).execute()
+        
+        if hasattr(exp_result, 'data') and exp_result.data:
+            for item in exp_result.data:
+                item['similarity'] = 0.98  # 略低於概念完全匹配
+                item['match_type'] = "解釋完全匹配"
+                # 避免重複添加
+                if not any(existing['id'] == item['id'] for existing in all_results):
+                    all_results.append(item)
+        
+        # 1.2 嘗試用核心問題進行匹配
+        if core_question != query:
+            core_concept_query = f"%{core_question}%"
+            core_result = supabase.table(st.session_state.knowledge_table).select("*").ilike("concept", core_concept_query).execute()
+            
+            if hasattr(core_result, 'data') and core_result.data:
+                for item in core_result.data:
+                    item['similarity'] = 0.99  # 僅次於完全匹配
+                    item['match_type'] = "核心問題概念匹配"
+                    if not any(existing['id'] == item['id'] for existing in all_results):
+                        all_results.append(item)
+            
+            # 同時在解釋欄位中搜索核心問題
+            core_exp_result = supabase.table(st.session_state.knowledge_table).select("*").ilike("explanation", core_concept_query).execute()
+            
+            if hasattr(core_exp_result, 'data') and core_exp_result.data:
+                for item in core_exp_result.data:
+                    item['similarity'] = 0.97  # 略低於核心問題概念匹配
+                    item['match_type'] = "核心問題解釋匹配"
+                    if not any(existing['id'] == item['id'] for existing in all_results):
+                        all_results.append(item)
         
         # 2. 嘗試提取關鍵詞進行部分配對
-        keywords = extract_keywords(query)
-        if keywords:
-            for keyword in keywords:
+        if all_keywords:
+            # 2.1 單一關鍵詞搜索
+            for keyword in all_keywords:
                 if len(keyword) >= 2:  # 確保關鍵詞至少2個字
-                    keyword_result = supabase.table(st.session_state.knowledge_table).select("*").ilike("concept", f"%{keyword}%").execute()
-                    if hasattr(keyword_result, 'data') and keyword_result.data:
+                    # 首先搜索概念欄位
+                    keyword_concept_query = f"%{keyword}%"
+                    keyword_concept_result = supabase.table(st.session_state.knowledge_table).select("*").ilike("concept", keyword_concept_query).execute()
+                    
+                    if hasattr(keyword_concept_result, 'data') and keyword_concept_result.data:
                         # 添加相似度欄位
-                        for item in keyword_result.data:
-                            item['similarity'] = 0.95  # 設定為稍低於完全配對的相似度
-                        return keyword_result.data
+                        for item in keyword_concept_result.data:
+                            item['similarity'] = 0.95  # 關鍵詞在概念欄位匹配，相似度較高
+                            item['match_type'] = f"關鍵詞在概念欄位匹配: {keyword}"
+                            # 避免重複添加相同的結果
+                            if not any(existing['id'] == item['id'] for existing in all_results):
+                                all_results.append(item)
+                    
+                    # 然後搜索解釋欄位
+                    keyword_exp_result = supabase.table(st.session_state.knowledge_table).select("*").ilike("explanation", keyword_concept_query).execute()
+                    
+                    if hasattr(keyword_exp_result, 'data') and keyword_exp_result.data:
+                        for item in keyword_exp_result.data:
+                            item['similarity'] = 0.85  # 關鍵詞在解釋欄位匹配，相似度較低
+                            item['match_type'] = f"關鍵詞在解釋欄位匹配: {keyword}"
+                            if not any(existing['id'] == item['id'] for existing in all_results):
+                                all_results.append(item)
+
+            # 2.2 嘗試相鄰關鍵詞組合搜索（提高精確度）
+            if len(all_keywords) >= 2:
+                for i in range(len(all_keywords) - 1):
+                    combined_keyword = f"{all_keywords[i]} {all_keywords[i+1]}"
+                    if len(combined_keyword) >= 3:
+                        # 搜索組合關鍵詞在概念欄位
+                        combined_query = f"%{combined_keyword}%"
+                        combined_concept_result = supabase.table(st.session_state.knowledge_table).select("*").ilike("concept", combined_query).execute()
+                        
+                        if hasattr(combined_concept_result, 'data') and combined_concept_result.data:
+                            for item in combined_concept_result.data:
+                                item['similarity'] = 0.98  # 組合關鍵詞在概念欄位匹配，得分最高
+                                item['match_type'] = f"關鍵詞組合在概念匹配: {combined_keyword}"
+                                if not any(existing['id'] == item['id'] for existing in all_results):
+                                    all_results.append(item)
+                        
+                        # 搜索組合關鍵詞在解釋欄位
+                        combined_exp_result = supabase.table(st.session_state.knowledge_table).select("*").ilike("explanation", combined_query).execute()
+                        
+                        if hasattr(combined_exp_result, 'data') and combined_exp_result.data:
+                            for item in combined_exp_result.data:
+                                item['similarity'] = 0.9  # 組合關鍵詞在解釋欄位匹配
+                                item['match_type'] = f"關鍵詞組合在解釋匹配: {combined_keyword}"
+                                if not any(existing['id'] == item['id'] for existing in all_results):
+                                    all_results.append(item)
+                                    
+        # 如果已經找到足夠的匹配結果，直接返回
+        if len(all_results) >= max(3, match_count // 2):
+            # 根據相似度排序結果
+            all_results.sort(key=lambda x: x['similarity'], reverse=True)
+            return all_results[:match_count]
         
-        # 3. 使用向量搜索進行相似性搜索
+        # 3. 使用向量搜索進行相似性搜索 - 使用核心問題的向量，更能捕捉語義
         result = supabase.rpc(
             "match_knowledge", 
             {
@@ -367,35 +508,97 @@ def search_knowledge(query, match_threshold=0.7, match_count=6):
             }
         ).execute()
         
-        # 處理結果
+        # 處理向量搜索結果
         if hasattr(result, 'data') and result.data:
-            return result.data
-        else:
-            # 如果向量搜索未找到結果，進一步降低閾值再試一次
-            if match_threshold > 0.5:
-                return search_knowledge(query, match_threshold=0.5, match_count=match_count)
+            for item in result.data:
+                item['match_type'] = "向量相似度匹配"
+                if not any(existing['id'] == item['id'] for existing in all_results):
+                    all_results.append(item)
+        
+        # 後續向量搜索降低閾值的部分保持不變
+        if len(all_results) < max(3, match_count // 2) and match_threshold > 0.5:
+            lower_threshold_result = supabase.rpc(
+                "match_knowledge", 
+                {
+                    "query_embedding": query_embedding,
+                    "match_threshold": 0.5,  # 降低閾值
+                    "match_count": match_count
+                }
+            ).execute()
             
-            # 4. 最後，搜索所有欄位作為後備選項
+            if hasattr(lower_threshold_result, 'data') and lower_threshold_result.data:
+                for item in lower_threshold_result.data:
+                    item['match_type'] = "低閾值向量匹配"
+                    if not any(existing['id'] == item['id'] for existing in all_results):
+                        all_results.append(item)
+        
+        # 如果還是找不到足夠結果，再降低閾值到更低
+        if len(all_results) < max(2, match_count // 3) and match_threshold > 0.3:
+            lowest_threshold_result = supabase.rpc(
+                "match_knowledge", 
+                {
+                    "query_embedding": query_embedding,
+                    "match_threshold": 0.3,  # 極低閾值
+                    "match_count": match_count
+                }
+            ).execute()
+            
+            if hasattr(lowest_threshold_result, 'data') and lowest_threshold_result.data:
+                for item in lowest_threshold_result.data:
+                    item['match_type'] = "最低閾值向量匹配"
+                    if not any(existing['id'] == item['id'] for existing in all_results):
+                        all_results.append(item)
+            
+        # 4. 最後搜索邏輯保持不變
+        if len(all_results) == 0:
             backup_result = supabase.table(st.session_state.knowledge_table).select("*").execute()
             if hasattr(backup_result, 'data') and backup_result.data:
                 # 簡單的文本配對
-                matched_items = []
                 for item in backup_result.data:
-                    combined_text = f"{item['concept']}: {item['explanation']}"
+                    combined_text = f"{item['concept']}: {item['explanation']}".lower()
                     # 檢查是否包含查詢中的任何關鍵詞
-                    if any(keyword in combined_text for keyword in keywords):
-                        item['similarity'] = 0.6  # 設定為較低的相似度
-                        matched_items.append(item)
-                
-                if matched_items:
-                    return matched_items
-            
-            return []
+                    matched_keywords = [keyword for keyword in all_keywords if keyword.lower() in combined_text]
+                    if matched_keywords:
+                        # 相似度根據匹配到的關鍵詞數量調整
+                        match_score = min(0.6 + 0.05 * len(matched_keywords), 0.75)  
+                        item['similarity'] = match_score
+                        item['match_type'] = f"文本包含匹配: {', '.join(matched_keywords[:3])}"
+                        all_results.append(item)
+        
+        # 根據相似度排序結果
+        all_results.sort(key=lambda x: x['similarity'], reverse=True)
+        return all_results[:match_count]
+    
     except Exception as e:
+        st.error(f"搜索知識時出錯: {str(e)}")
         return []
 
+# 使用 OpenAI 生成回答
+def generate_openai_response(messages, model, streaming=False):
+    """使用 OpenAI API 生成回答，支援串流和非串流模式"""
+    try:
+        # 串流模式
+        if streaming:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=llm_temperature,
+                stream=True
+            )
+            return response, "串流"
+        # 非串流模式
+        else:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=llm_temperature
+            )
+            return response.choices[0].message.content.strip(), "成功"
+    except Exception as e:
+        return f"OpenAI API 錯誤: {str(e)}", "錯誤"
+
 # 使用 Amazon Bedrock 生成回答
-def generate_bedrock_response(messages, model_id):
+def generate_bedrock_response(messages, model_id, streaming=False):
     """使用 Amazon Bedrock 生成回答"""
     if not bedrock_runtime:
         return "Amazon Bedrock 未正確配置，請確認您已設定 AWS 憑證。", "配置錯誤"
@@ -423,12 +626,32 @@ def generate_bedrock_response(messages, model_id):
             if "claude-3-5" in model_id.lower():
                 prompt["max_tokens"] = 2048
             
-            response = bedrock_runtime.invoke_model(
-                modelId=model_id,
-                body=json.dumps(prompt)
-            )
-            response_body = json.loads(response.get("body").read())
-            return response_body.get("content")[0].get("text"), "成功"
+            # 添加串流參數
+            if streaming:
+                try:
+                    response = bedrock_runtime.invoke_model_with_response_stream(
+                        modelId=model_id,
+                        body=json.dumps(prompt)
+                    )
+                    # 確保返回的是流式響應對象，而不是字符串錯誤信息
+                    if isinstance(response, dict) and 'body' in response:
+                        return response, "串流"
+                    else:
+                        # 如果響應不是預期的流式對象，返回錯誤信息
+                        error_msg = "無法獲取正確的串流回應格式"
+                        if isinstance(response, str):
+                            error_msg = response
+                        return error_msg, "錯誤"
+                except Exception as e:
+                    # 捕獲並處理流式請求中的錯誤
+                    return f"串流請求錯誤: {str(e)}", "錯誤"
+            else:
+                response = bedrock_runtime.invoke_model(
+                    modelId=model_id,
+                    body=json.dumps(prompt)
+                )
+                response_body = json.loads(response.get("body").read())
+                return response_body.get("content")[0].get("text"), "成功"
         
         # 處理 Meta Llama 模型
         elif "meta.llama" in model_id.lower():
@@ -606,8 +829,8 @@ def generate_bedrock_response(messages, model_id):
         return f"生成回答時發生錯誤: {str(e)}", "處理錯誤"
 
 # 使用 DeepSeek API 生成回答
-def generate_deepseek_response(messages, model_id):
-    """直接使用 DeepSeek API 生成回答，而不是通過 Bedrock"""
+def generate_deepseek_response(messages, model_id, streaming=False):
+    """直接使用 DeepSeek API 生成回答，支援串流模式"""
     if not deepseek_api_key:
         return "DeepSeek API 未正確配置，請確認您已設定 API 密鑰。", "配置錯誤"
     
@@ -637,7 +860,8 @@ def generate_deepseek_response(messages, model_id):
             "model": model_id,
             "messages": formatted_messages,
             "temperature": llm_temperature,
-            "max_tokens": 2048
+            "max_tokens": 2048,
+            "stream": streaming
         }
         
         if system_content:
@@ -647,18 +871,23 @@ def generate_deepseek_response(messages, model_id):
         response = requests.post(
             "https://api.deepseek.com/v1/chat/completions",
             headers=headers,
-            json=payload
+            json=payload,
+            stream=streaming
         )
         
         # 檢查響應狀態
         response.raise_for_status()
-        result = response.json()
         
-        # 從響應中提取回答
-        if "choices" in result and len(result["choices"]) > 0:
-            return result["choices"][0]["message"]["content"], "成功"
+        # 串流模式
+        if streaming:
+            return response, "串流"
+        # 非串流模式
         else:
-            return "無法從 DeepSeek 獲取回應", "回應解析錯誤"
+            result = response.json()
+            if "choices" in result and len(result["choices"]) > 0:
+                return result["choices"][0]["message"]["content"], "成功"
+            else:
+                return "無法從 DeepSeek 獲取回應", "回應解析錯誤"
             
     except requests.exceptions.HTTPError as e:
         status_code = e.response.status_code
@@ -679,34 +908,72 @@ def generate_direct_response(query):
         
         # 根據供應商選擇不同的實現
         if st.session_state.llm_provider == "openai":
-            response = client.chat.completions.create(
-                model=llm_model,  # 使用從環境變數讀取的模型
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": query}
-                ],
-                temperature=llm_temperature
-            )
-            return response.choices[0].message.content.strip(), current_status
+            use_streaming = st.session_state.use_streaming
+            if use_streaming:
+                stream_response, _ = generate_openai_response(
+                    messages=[
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": query}
+                    ],
+                    model=llm_model,
+                    streaming=True
+                )
+                return stream_response, "串流"
+            else:
+                response_text, _ = generate_openai_response(
+                    messages=[
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": query}
+                    ],
+                    model=llm_model,
+                    streaming=False
+                )
+                return response_text, current_status
         elif st.session_state.llm_provider == "bedrock":
-            response_text, status = generate_bedrock_response(
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": query}
-                ],
-                model_id=bedrock_model_id
-            )
-            return response_text, current_status
+            use_streaming = st.session_state.use_streaming
+            if use_streaming:
+                stream_response, _ = generate_bedrock_response(
+                    messages=[
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": query}
+                    ],
+                    model_id=bedrock_model_id,
+                    streaming=True
+                )
+                return stream_response, "串流"
+            else:
+                response_text, status = generate_bedrock_response(
+                    messages=[
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": query}
+                    ],
+                    model_id=bedrock_model_id,
+                    streaming=False
+                )
+                return response_text, current_status
         elif st.session_state.llm_provider == "deepseek":
             # DeepSeek 實現
-            response_text, status = generate_deepseek_response(
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": query}
-                ],
-                model_id=deepseek_model
-            )
-            return response_text, current_status
+            use_streaming = st.session_state.use_streaming
+            if use_streaming:
+                stream_response, _ = generate_deepseek_response(
+                    messages=[
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": query}
+                    ],
+                    model_id=deepseek_model,
+                    streaming=True
+                )
+                return stream_response, "串流"
+            else:
+                response_text, status = generate_deepseek_response(
+                    messages=[
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": query}
+                    ],
+                    model_id=deepseek_model,
+                    streaming=False
+                )
+                return response_text, current_status
         else:
             return "未支援的 LLM 供應商", "配置錯誤"
     except Exception as e:
@@ -843,77 +1110,124 @@ if prompt:
     # 修改 RAG 函數來使用我們的狀態更新函數
     def rag_with_status(query):
         update_status("我正在思考你的問題...")
-        core_result = extract_core_question_with_llm(query)
-        core_question = core_result.get("core_question", query)
-        st.session_state.last_core_question = core_question
-        st.session_state.last_keywords = core_result.get("keywords", [])
-        
-        update_status("正在從知識庫尋找相關資訊...")
-        knowledge_points = search_knowledge(core_question)
-        st.session_state.last_knowledge_points = knowledge_points
-        
-        if not knowledge_points:
-            update_status("好像沒有未找到相關知識點")
-            return direct_with_status(query)
-        
-        update_status("找到了相關資訊，正在生成回答...")
-        context = "\n".join([f"概念: {item['concept']}\n解釋: {item['explanation']}" for item in knowledge_points])
-        
-        prompt = f"""
-        知識點:
-        {context}
-        
-        原始問題: {query}
-        核心問題: {core_question}
-        
-        回答:
-        
-        
-        """
-        
-        # 獲取系統提示詞
-        system_content = st.session_state.custom_prompt
-        
-        # 構建對話歷史，包含最近的對話
-        messages = [{"role": "system", "content": system_content}]
-        
-        # 添加歷史對話記錄（只保留最近的幾輪）
-        memory_limit = st.session_state.memory_length
-        recent_messages = st.session_state.messages[-2*memory_limit:] if len(st.session_state.messages) > 2*memory_limit else st.session_state.messages[:]
-        
-        # 添加歷史對話記錄
-        for msg in recent_messages:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-        
-        # 添加當前問題和上下文
-        messages.append({"role": "user", "content": prompt})
-        
-        # 生成回答
         try:
-            if st.session_state.llm_provider == "openai":
-                response = client.chat.completions.create(
-                    model=llm_model,  # 使用從環境變數讀取的模型
-                    messages=messages,
-                    temperature=llm_temperature
-                )
-                return response.choices[0].message.content.strip()
-            elif st.session_state.llm_provider == "bedrock":
-                response_text, status = generate_bedrock_response(
-                    messages=messages,
-                    model_id=bedrock_model_id
-                )
-                return response_text
-            elif st.session_state.llm_provider == "deepseek":
-                response_text, status = generate_deepseek_response(
-                    messages=messages,
-                    model_id=deepseek_model
-                )
-                return response_text
-            else:
-                return "未支援的 LLM 供應商"
+            core_result = extract_core_question_with_llm(query)
+            core_question = core_result.get("core_question", query)
+            st.session_state.last_core_question = core_question
+            st.session_state.last_keywords = core_result.get("keywords", [])
+            
+            update_status("正在從知識庫尋找相關資訊...")
+            try:
+                knowledge_points = search_knowledge(core_question)
+                st.session_state.last_knowledge_points = knowledge_points
+            except Exception as e:
+                update_status(f"搜索知識庫時出錯: {str(e)}，將直接使用AI生成回答")
+                st.error(f"搜索知識時出錯: {str(e)}")
+                return direct_with_status(query)
+            
+            if not knowledge_points:
+                update_status("好像沒有找到相關知識點")
+                return direct_with_status(query)
+            
+            update_status("找到了相關資訊，正在生成回答...")
+            
+            # 準備知識點信息，添加匹配類型和相似度的顯示
+            knowledge_info = []
+            for item in knowledge_points:
+                match_info = f"({item.get('match_type', '未知匹配類型')}, 相似度: {item.get('similarity', 0):.2f})"
+                knowledge_info.append(f"概念: {item['concept']} {match_info}\n解釋: {item['explanation']}")
+            
+            context = "\n\n".join(knowledge_info)
+            
+            prompt = f"""
+            知識點:
+            {context}
+            
+            原始問題: {query}
+            核心問題: {core_question}
+            
+            請根據上述知識點信息回答用戶的問題。回答應該清晰、準確，並基於提供的知識點。
+            請以自然、對話的方式回答，不要直接複製知識點的文本，而是根據內容提供信息豐富的解釋。
+            不需要在回答中提及匹配類型和相似度，這些只是用來幫助你理解知識點的重要性。
+            如果知識點中包含矛盾的信息，請優先考慮相似度較高的知識點。
+            
+            回答:
+            
+            
+            """
+            
+            # 獲取系統提示詞
+            system_content = st.session_state.custom_prompt
+            
+            # 構建對話歷史，包含最近的對話
+            messages = [{"role": "system", "content": system_content}]
+            
+            # 添加歷史對話記錄（只保留最近的幾輪）
+            memory_limit = st.session_state.memory_length
+            recent_messages = st.session_state.messages[-2*memory_limit:] if len(st.session_state.messages) > 2*memory_limit else st.session_state.messages[:]
+            
+            # 添加歷史對話記錄
+            for msg in recent_messages:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+            
+            # 添加當前問題和上下文
+            messages.append({"role": "user", "content": prompt})
+            
+            # 生成回答
+            try:
+                if st.session_state.llm_provider == "openai":
+                    if st.session_state.use_streaming:
+                        response, _ = generate_openai_response(
+                            messages=messages,
+                            model=llm_model,
+                            streaming=True
+                        )
+                        return response, "串流"
+                    else:
+                        response_text, _ = generate_openai_response(
+                            messages=messages,
+                            model=llm_model,
+                            streaming=False
+                        )
+                        return response_text
+                elif st.session_state.llm_provider == "bedrock":
+                    if st.session_state.use_streaming:
+                        response, _ = generate_bedrock_response(
+                            messages=messages,
+                            model_id=bedrock_model_id,
+                            streaming=True
+                        )
+                        return response, "串流"
+                    else:
+                        response_text, _ = generate_bedrock_response(
+                            messages=messages,
+                            model_id=bedrock_model_id,
+                            streaming=False
+                        )
+                        return response_text
+                elif st.session_state.llm_provider == "deepseek":
+                    if st.session_state.use_streaming:
+                        response, _ = generate_deepseek_response(
+                            messages=messages,
+                            model_id=deepseek_model,
+                            streaming=True
+                        )
+                        return response, "串流"
+                    else:
+                        response_text, _ = generate_deepseek_response(
+                            messages=messages,
+                            model_id=deepseek_model,
+                            streaming=False
+                        )
+                        return response_text
+                else:
+                    return "未支援的 LLM 供應商"
+            except Exception as e:
+                update_status(f"生成回答時出錯: {str(e)}")
+                return f"生成回答時發生錯誤: {str(e)}"
         except Exception as e:
-            update_status(f"生成回答時出錯: {str(e)}")
-            return f"生成回答時發生錯誤: {str(e)}"
+            update_status(f"處理問題時發生錯誤: {str(e)}，轉用直接回答")
+            return direct_with_status(query)
     
     # 直接回答的函數，帶狀態更新
     def direct_with_status(query):
@@ -938,24 +1252,50 @@ if prompt:
             
             # 根據供應商選擇不同的實現
             if st.session_state.llm_provider == "openai":
-                response = client.chat.completions.create(
-                    model=llm_model,  # 使用從環境變數讀取的模型
-                    messages=messages,
-                    temperature=llm_temperature
-                )
-                return response.choices[0].message.content.strip()
+                if st.session_state.use_streaming:
+                    response, _ = generate_openai_response(
+                        messages=messages,
+                        model=llm_model,
+                        streaming=True
+                    )
+                    return response, "串流"
+                else:
+                    response_text, _ = generate_openai_response(
+                        messages=messages,
+                        model=llm_model,
+                        streaming=False
+                    )
+                    return response_text
             elif st.session_state.llm_provider == "bedrock":
-                response_text, status = generate_bedrock_response(
-                    messages=messages,
-                    model_id=bedrock_model_id
-                )
-                return response_text
+                if st.session_state.use_streaming:
+                    response, _ = generate_bedrock_response(
+                        messages=messages,
+                        model_id=bedrock_model_id,
+                        streaming=True
+                    )
+                    return response, "串流"
+                else:
+                    response_text, _ = generate_bedrock_response(
+                        messages=messages,
+                        model_id=bedrock_model_id,
+                        streaming=False
+                    )
+                    return response_text
             elif st.session_state.llm_provider == "deepseek":
-                response_text, status = generate_deepseek_response(
-                    messages=messages,
-                    model_id=deepseek_model
-                )
-                return response_text
+                if st.session_state.use_streaming:
+                    response, _ = generate_deepseek_response(
+                        messages=messages,
+                        model_id=deepseek_model,
+                        streaming=True
+                    )
+                    return response, "串流"
+                else:
+                    response_text, _ = generate_deepseek_response(
+                        messages=messages,
+                        model_id=deepseek_model,
+                        streaming=False
+                    )
+                    return response_text
             else:
                 return "未支援的 LLM 供應商"
         except Exception as e:
@@ -964,24 +1304,102 @@ if prompt:
     
     # 使用知識庫或直接回答
     if supabase and voyage_api_key:
-        response_text = rag_with_status(prompt)
+        response_result = rag_with_status(prompt)
+        # 判斷回應類型
+        if isinstance(response_result, tuple) and response_result[1] == "串流":
+            stream_response = response_result[0]
+            is_streaming = True
+        else:
+            response_text = response_result
+            is_streaming = False
     else:
-        response_text = direct_with_status(prompt)
+        response_result = direct_with_status(prompt)
+        # 判斷回應類型
+        if isinstance(response_result, tuple) and response_result[1] == "串流":
+            stream_response = response_result[0]
+            is_streaming = True
+        else:
+            response_text = response_result
+            is_streaming = False
     
     # 清空狀態訊息
     status_msg.empty()
     
-    # 顯示最終回答
+    # 顯示回答（串流或完整）
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        full_response = response_text
         
-        # 逐字顯示回答
-        displayed_message = ""
-        for i in range(len(full_response) + 1):
-            displayed_message = full_response[:i]
-            message_placeholder.markdown(displayed_message)
-            time.sleep(0.01)  # 控制打字速度
+        if is_streaming:
+            # 處理串流響應
+            full_response = ""
+            
+            if st.session_state.llm_provider == "openai":
+                # 處理 OpenAI 串流
+                for chunk in stream_response:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        full_response += content
+                        message_placeholder.markdown(full_response)
+            
+            elif st.session_state.llm_provider == "bedrock":
+                # 處理 Bedrock 串流
+                if hasattr(stream_response, 'get'):
+                    for event in stream_response.get('body'):
+                        if "anthropic.claude" in bedrock_model_id.lower():
+                            if event.get('chunk') and event['chunk'].get('bytes'):
+                                chunk_data = json.loads(event['chunk']['bytes'].decode())
+                                if 'text' in chunk_data.get('delta', {}) and chunk_data['delta']['text']:
+                                    content = chunk_data['delta']['text']
+                                    full_response += content
+                                    message_placeholder.markdown(full_response)
+                else:
+                    # 如果stream_response是字串或其他類型，直接顯示
+                    if isinstance(stream_response, str):
+                        full_response = stream_response
+                        message_placeholder.markdown(full_response)
+                    elif hasattr(stream_response, 'iter_lines'):
+                        # 嘗試使用不同的串流處理方式
+                        try:
+                            for line in stream_response.iter_lines():
+                                if line:
+                                    line_str = line.decode('utf-8') if isinstance(line, bytes) else str(line)
+                                    if line_str.startswith('{'):
+                                        try:
+                                            json_data = json.loads(line_str)
+                                            if 'delta' in json_data:
+                                                content = json_data['delta'].get('text', '')
+                                                if content:
+                                                    full_response += content
+                                                    message_placeholder.markdown(full_response)
+                                        except json.JSONDecodeError:
+                                            pass
+                        except Exception as e:
+                            # 如果串流處理失敗，直接顯示錯誤訊息
+                            full_response = f"串流處理錯誤: {str(e)}"
+                            message_placeholder.markdown(full_response)
+            
+            elif st.session_state.llm_provider == "deepseek":
+                # 處理 DeepSeek 串流
+                for line in stream_response.iter_lines():
+                    if line:
+                        line = line.decode('utf-8')
+                        if line.startswith('data: ') and line != 'data: [DONE]':
+                            json_data = json.loads(line[6:])
+                            if 'choices' in json_data and json_data['choices'] and 'delta' in json_data['choices'][0]:
+                                content = json_data['choices'][0]['delta'].get('content', '')
+                                if content:
+                                    full_response += content
+                                    message_placeholder.markdown(full_response)
+            
+            response_text = full_response  # 保存完整的回答用於添加到聊天歷史
+        else:
+            # 非串流模式，使用打字效果
+            full_response = response_text
+            displayed_message = ""
+            for i in range(len(full_response) + 1):
+                displayed_message = full_response[:i]
+                message_placeholder.markdown(displayed_message)
+                time.sleep(0.01)  # 控制打字速度
     
     # 添加助手消息到聊天記錄
     st.session_state.messages.append({"role": "assistant", "content": response_text})
