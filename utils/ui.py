@@ -83,12 +83,8 @@ def setup_sidebar():
             st.session_state.llm_provider = selected_provider
             st.success(f"已切換到 {selected_provider} 模型")
         
-        # 串流模式設置
-        streaming_enabled = st.toggle("啟用串流模式", st.session_state.use_streaming, 
-                                    help="啟用串流模式後，回答將逐步顯示，不必等待完整回答生成。")
-        if streaming_enabled != st.session_state.use_streaming:
-            st.session_state.use_streaming = streaming_enabled
-            st.success("串流模式設定已更新")
+        # 串流模式始終啟用
+        st.session_state.use_streaming = True
         
         # 根據供應商顯示對應的模型選擇
         if st.session_state.llm_provider == "openai":
