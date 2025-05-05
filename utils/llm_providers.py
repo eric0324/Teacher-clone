@@ -17,11 +17,11 @@ def generate_openai_response(messages, model, streaming=False):
         
         # 依據模型設定適當的 max_tokens
         max_tokens_mapping = {
-            "gpt-4-turbo": 10000,
-            "gpt-4": 10000,
-            "gpt-4-32k": 10000,
-            "gpt-4-1106-preview": 10000,
-            "gpt-4-0125-preview": 10000,
+            "gpt-4-turbo": 80000,
+            "gpt-4": 80000,
+            "gpt-4-32k": 80000,
+            "gpt-4-1106-preview": 80000,
+            "gpt-4-0125-preview": 80000,
             "gpt-3.5-turbo": 4000,
             "gpt-3.5-turbo-16k": 14000,
         }
@@ -67,12 +67,12 @@ def generate_claude_response(messages, model, streaming=False):
     # Claude 3 Opus 和 Haiku 最大支援 200,000 tokens
     # Claude 3.0 支援 200,000 tokens
     max_tokens_mapping = {
-        "claude-3-7-sonnet-20250219": 10000,
+        "claude-3-7-sonnet-20250219": 80000,
         "claude-3-5-sonnet-20241022": 4000,
     }
     
-    # 獲取該模型的 max_tokens，如果沒找到則默認為 10000
-    max_tokens = max_tokens_mapping.get(model, 10000)
+    # 獲取該模型的 max_tokens，如果沒找到則默認為 80000
+    max_tokens = max_tokens_mapping.get(model, 80000)
     
     # 設定重試參數
     max_retries = 3
@@ -177,10 +177,10 @@ def generate_deepseek_response(messages, model_id, streaming=False):
         
         # 依據模型設定適當的 max_tokens
         max_tokens_mapping = {
-            "deepseek-chat": 8000
+            "deepseek-chat": 80000
         }
-        # 獲取該模型的 max_tokens，如果沒找到則默認為 10000
-        max_tokens = max_tokens_mapping.get(model_id, 10000)
+        # 獲取該模型的 max_tokens，如果沒找到則默認為 80000
+        max_tokens = max_tokens_mapping.get(model_id, 80000)
         
         # 構建請求體
         payload = {
