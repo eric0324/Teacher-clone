@@ -15,12 +15,26 @@ def generate_openai_response(messages, model, streaming=False):
         # 設置 API 金鑰
         openai.api_key = openai_api_key
         
+        # 依據模型設定適當的 max_tokens
+        max_tokens_mapping = {
+            "gpt-4-turbo": 10000,
+            "gpt-4": 10000,
+            "gpt-4-32k": 10000,
+            "gpt-4-1106-preview": 10000,
+            "gpt-4-0125-preview": 10000,
+            "gpt-3.5-turbo": 4000,
+            "gpt-3.5-turbo-16k": 14000,
+        }
+        # 獲取該模型的 max_tokens，如果沒找到則默認為 4000
+        max_tokens = max_tokens_mapping.get(model, 4000)
+        
         # 串流模式
         if streaming:
             response = openai.ChatCompletion.create(
                 model=model,
                 messages=messages,
                 temperature=llm_temperature,
+                max_tokens=max_tokens,
                 stream=True
             )
             return response, "串流"
@@ -29,7 +43,8 @@ def generate_openai_response(messages, model, streaming=False):
             response = openai.ChatCompletion.create(
                 model=model,
                 messages=messages,
-                temperature=llm_temperature
+                temperature=llm_temperature,
+                max_tokens=max_tokens
             )
             return response.choices[0].message.content.strip(), "成功"
     except Exception as e:
@@ -46,6 +61,18 @@ def generate_claude_response(messages, model, streaming=False):
     
     if not claude_api_key:
         return "Claude API 金鑰未設定", "配置錯誤"
+    
+    # 依據模型設定適當的 max_tokens
+    # Claude 3.5 Sonnet 最大支援 16,384 tokens
+    # Claude 3 Opus 和 Haiku 最大支援 200,000 tokens
+    # Claude 3.0 支援 200,000 tokens
+    max_tokens_mapping = {
+        "claude-3-7-sonnet-20250219": 10000,
+        "claude-3-5-sonnet-20241022": 4000,
+    }
+    
+    # 獲取該模型的 max_tokens，如果沒找到則默認為 10000
+    max_tokens = max_tokens_mapping.get(model, 10000)
     
     # 設定重試參數
     max_retries = 3
@@ -81,7 +108,7 @@ def generate_claude_response(messages, model, streaming=False):
                     messages=formatted_messages,
                     system=system_content,
                     temperature=llm_temperature,
-                    max_tokens=8000,
+                    max_tokens=max_tokens,
                     stream=True
                 )
                 return response, "串流"
@@ -92,7 +119,7 @@ def generate_claude_response(messages, model, streaming=False):
                     messages=formatted_messages,
                     system=system_content,
                     temperature=llm_temperature,
-                    max_tokens=8000
+                    max_tokens=max_tokens
                 )
                 return response.content[0].text, "成功"
                 
@@ -148,12 +175,19 @@ def generate_deepseek_response(messages, model_id, streaming=False):
                 "content": msg["content"]
             })
         
+        # 依據模型設定適當的 max_tokens
+        max_tokens_mapping = {
+            "deepseek-chat": 8000
+        }
+        # 獲取該模型的 max_tokens，如果沒找到則默認為 10000
+        max_tokens = max_tokens_mapping.get(model_id, 10000)
+        
         # 構建請求體
         payload = {
             "model": model_id,
             "messages": formatted_messages,
             "temperature": llm_temperature,
-            "max_tokens": 8000,
+            "max_tokens": max_tokens,
             "stream": streaming
         }
         

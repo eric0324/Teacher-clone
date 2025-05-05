@@ -98,10 +98,7 @@ def setup_sidebar():
         elif st.session_state.llm_provider == "claude":
             claude_models = [
                 "claude-3-7-sonnet-20250219",
-                "claude-3-5-sonnet-20240620-v1",
-                "claude-3-opus-20240229-v1",
-                "claude-3-sonnet-20240229-v1",
-                "claude-3-haiku-20240307-v1"
+                "claude-3-5-sonnet-20241022",
             ]
             claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")
             selected_claude_model = st.selectbox(
