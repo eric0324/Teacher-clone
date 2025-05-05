@@ -53,18 +53,24 @@ def generate_claude_response(messages, model, streaming=False):
     
     for attempt in range(max_retries):
         try:
-            client = Anthropic(api_key=claude_api_key)
+            # 創建Anthropic客戶端，使用適當的API版本設置
+            client = Anthropic(
+                api_key=claude_api_key,
+                default_headers={
+                    "anthropic-version": "2023-06-01" # 設置API版本
+                }
+            )
             
             # 處理系統提示
             system_message = next((msg for msg in messages if msg["role"] == "system"), None)
             system_content = system_message["content"] if system_message else None
             
             # 從消息列表中移除系統消息
-            messages = [msg for msg in messages if msg["role"] != "system"]
+            filtered_messages = [msg for msg in messages if msg["role"] != "system"]
             
             # 準備消息格式
             formatted_messages = []
-            for msg in messages:
+            for msg in filtered_messages:
                 role = "user" if msg["role"] == "user" else "assistant"
                 formatted_messages.append({"role": role, "content": msg["content"]})
                 

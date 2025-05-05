@@ -250,11 +250,22 @@ def display_streaming_response(stream_response, message_placeholder):
     elif llm_provider == "claude":
         # 處理 Claude 串流
         for chunk in stream_response:
-            if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'content'):
-                content = chunk.delta.content
-                if content:
-                    full_response += content
-                    message_placeholder.markdown(full_response)
+            # 處理不同類型的事件和結構
+            if hasattr(chunk, 'type'):
+                # 處理content_block_delta事件
+                if chunk.type == 'content_block_delta' and hasattr(chunk, 'delta'):
+                    if hasattr(chunk.delta, 'type') and chunk.delta.type == 'text_delta':
+                        if hasattr(chunk.delta, 'text'):
+                            content = chunk.delta.text
+                            if content:
+                                full_response += content
+                                message_placeholder.markdown(full_response)
+                # Claude 2.x 舊版API
+                elif chunk.type == 'completion' and hasattr(chunk, 'completion'):
+                    content = chunk.completion
+                    if content:
+                        full_response += content
+                        message_placeholder.markdown(full_response)
     
     elif llm_provider == "deepseek":
         # 處理 DeepSeek 串流
