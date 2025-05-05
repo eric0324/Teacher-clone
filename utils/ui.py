@@ -1,5 +1,6 @@
 import streamlit as st
 from utils.config import get_env_variable, load_system_prompt
+import os
 
 def setup_ui():
     """設置UI樣式和元素"""
@@ -68,11 +69,11 @@ def setup_sidebar():
         voyage_model = get_env_variable("VOYAGE_MODEL", "voyage-2")
         
         # LLM 供應商選擇
-        llm_provider_options = ["deepseek", "bedrock", "openai"]
+        llm_provider_options = ["deepseek", "claude", "openai"]
         selected_provider = st.selectbox(
             "選擇大語言模型供應商", 
             llm_provider_options,
-            index=llm_provider_options.index(st.session_state.llm_provider)
+            index=llm_provider_options.index(st.session_state.llm_provider) if st.session_state.llm_provider in llm_provider_options else 0
         )
         
         if selected_provider != st.session_state.llm_provider:
@@ -95,17 +96,26 @@ def setup_sidebar():
                 openai_models, 
                 index=openai_models.index(llm_model) if llm_model in openai_models else 0
             )
-        elif st.session_state.llm_provider == "bedrock":
-            bedrock_models = [
-                "anthropic.claude-3-5-sonnet-20240620-v1:0",
-                "anthropic.claude-3-haiku-20240307-v1:0",
+        elif st.session_state.llm_provider == "claude":
+            claude_models = [
+                "claude-3-7-sonnet-20250219",
+                "claude-3-5-sonnet-20240620-v1",
+                "claude-3-opus-20240229-v1",
+                "claude-3-sonnet-20240229-v1",
+                "claude-3-haiku-20240307-v1"
             ]
-            bedrock_model_id = get_env_variable("BEDROCK_MODEL_ID", "amazon.titan-text-express-v1")
-            selected_bedrock_model = st.selectbox(
-                "選擇 Amazon Bedrock 模型", 
-                bedrock_models, 
-                index=bedrock_models.index(bedrock_model_id) if bedrock_model_id in bedrock_models else 0
+            claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-5-sonnet-20240620-v1")
+            selected_claude_model = st.selectbox(
+                "選擇 Claude 模型", 
+                claude_models, 
+                index=claude_models.index(claude_model) if claude_model in claude_models else 0
             )
+            
+            # 保存選定的 Claude 模型
+            if selected_claude_model != claude_model:
+                os.environ["CLAUDE_MODEL"] = selected_claude_model
+                st.success(f"已切換到 {selected_claude_model} 模型")
+                
         elif st.session_state.llm_provider == "deepseek":
             # DeepSeek 模型選擇
             deepseek_models = ["deepseek-chat"]

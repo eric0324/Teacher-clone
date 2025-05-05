@@ -1,9 +1,8 @@
 import os
-import boto3
 import streamlit as st
 from dotenv import load_dotenv
-from openai import OpenAI
-from supabase import create_client, Client
+import openai
+from supabase import create_client
 from pathlib import Path
 
 def get_env_variable(key, default_value=""):
@@ -35,11 +34,9 @@ def load_config():
         "deepseek_api_key": get_env_variable("DEEPSEEK_API_KEY", ""),
         "deepseek_model": get_env_variable("DEEPSEEK_MODEL", "deepseek-chat"),
         
-        # Amazon Bedrock設置
-        "aws_region": get_env_variable("AWS_REGION", "us-east-1"),
-        "aws_access_key": get_env_variable("AWS_ACCESS_KEY_ID", ""),
-        "aws_secret_key": get_env_variable("AWS_SECRET_ACCESS_KEY", ""),
-        "bedrock_model_id": get_env_variable("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20240620-v1:0"),
+        # Claude設置
+        "claude_api_key": get_env_variable("CLAUDE_API_KEY", ""),
+        "claude_model": get_env_variable("CLAUDE_MODEL", "claude-3-5-sonnet-20240620-v1"),
         
         # Supabase設置
         "supabase_url": get_env_variable("SUPABASE_URL", ""),
@@ -58,24 +55,21 @@ def load_config():
         "auth_password": get_env_variable("AUTH_PASSWORD", "password"),
     }
     
-    # 初始化OpenAI客戶端
+    # 初始化OpenAI客戶端 (使用舊版API)
     if config["openai_api_key"]:
-        config["openai_client"] = OpenAI(api_key=config["openai_api_key"])
+        openai.api_key = config["openai_api_key"]
+        config["openai_client"] = openai
     else:
         config["openai_client"] = None
-        
-    # 初始化Bedrock客戶端
-    config["bedrock_runtime"] = None
-    if config["aws_access_key"] and config["aws_secret_key"]:
+    
+    # 初始化Claude客戶端
+    config["claude_client"] = None
+    if config["claude_api_key"]:
         try:
-            config["bedrock_runtime"] = boto3.client(
-                service_name="bedrock-runtime",
-                region_name=config["aws_region"],
-                aws_access_key_id=config["aws_access_key"],
-                aws_secret_access_key=config["aws_secret_key"]
-            )
+            from anthropic import Anthropic
+            config["claude_client"] = Anthropic(api_key=config["claude_api_key"])
         except Exception as e:
-            st.error(f"初始化 Bedrock 客戶端時出錯: {str(e)}")
+            st.error(f"初始化 Claude 客戶端時出錯: {str(e)}")
     
     # 初始化Supabase客戶端
     config["supabase"] = None

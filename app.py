@@ -10,7 +10,7 @@ from utils.auth import check_password
 from utils.knowledge import search_knowledge, extract_core_question_with_llm
 from utils.llm_providers import (
     generate_openai_response, 
-    generate_bedrock_response, 
+    generate_claude_response, 
     generate_deepseek_response
 )
 
@@ -191,19 +191,19 @@ def generate_response(messages):
                 streaming=False
             )
             return response_text
-    elif llm_provider == "bedrock":
-        bedrock_model_id = get_env_variable("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20240620-v1:0")
+    elif llm_provider == "claude":
+        claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-5-sonnet-20240620-v1")
         if use_streaming:
-            response, _ = generate_bedrock_response(
+            response, _ = generate_claude_response(
                 messages=messages,
-                model_id=bedrock_model_id,
+                model=claude_model,
                 streaming=True
             )
             return response, "串流"
         else:
-            response_text, _ = generate_bedrock_response(
+            response_text, _ = generate_claude_response(
                 messages=messages,
-                model_id=bedrock_model_id,
+                model=claude_model,
                 streaming=False
             )
             return response_text
@@ -234,47 +234,26 @@ def display_streaming_response(stream_response, message_placeholder):
     if llm_provider == "openai":
         # 處理 OpenAI 串流
         for chunk in stream_response:
-            if chunk.choices and chunk.choices[0].delta.content:
-                content = chunk.choices[0].delta.content
-                full_response += content
-                message_placeholder.markdown(full_response)
+            if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
+                if hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        full_response += content
+                        message_placeholder.markdown(full_response)
+                elif hasattr(chunk.choices[0], 'text'):
+                    # 舊版 API 可能使用 text 而非 content
+                    content = chunk.choices[0].text
+                    if content:
+                        full_response += content
+                        message_placeholder.markdown(full_response)
     
-    elif llm_provider == "bedrock":
-        # 處理 Bedrock 串流
-        if hasattr(stream_response, 'get'):
-            for event in stream_response.get('body'):
-                bedrock_model_id = get_env_variable("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20240620-v1:0")
-                if "anthropic.claude" in bedrock_model_id.lower():
-                    if event.get('chunk') and event['chunk'].get('bytes'):
-                        chunk_data = json.loads(event['chunk']['bytes'].decode())
-                        if 'text' in chunk_data.get('delta', {}) and chunk_data['delta']['text']:
-                            content = chunk_data['delta']['text']
-                            full_response += content
-                            message_placeholder.markdown(full_response)
-        else:
-            # 如果stream_response是字串或其他類型，直接顯示
-            if isinstance(stream_response, str):
-                full_response = stream_response
-                message_placeholder.markdown(full_response)
-            elif hasattr(stream_response, 'iter_lines'):
-                # 嘗試使用不同的串流處理方式
-                try:
-                    for line in stream_response.iter_lines():
-                        if line:
-                            line_str = line.decode('utf-8') if isinstance(line, bytes) else str(line)
-                            if line_str.startswith('{'):
-                                try:
-                                    json_data = json.loads(line_str)
-                                    if 'delta' in json_data:
-                                        content = json_data['delta'].get('text', '')
-                                        if content:
-                                            full_response += content
-                                            message_placeholder.markdown(full_response)
-                                except json.JSONDecodeError:
-                                    pass
-                except Exception as e:
-                    # 如果串流處理失敗，直接顯示錯誤訊息
-                    full_response = f"串流處理錯誤: {str(e)}"
+    elif llm_provider == "claude":
+        # 處理 Claude 串流
+        for chunk in stream_response:
+            if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'content'):
+                content = chunk.delta.content
+                if content:
+                    full_response += content
                     message_placeholder.markdown(full_response)
     
     elif llm_provider == "deepseek":
@@ -329,15 +308,12 @@ if prompt:
         st.info("如何設置API金鑰: \n\n"
                 "本地開發: 在專案根目錄創建.env檔案，然後添加 `OPENAI_API_KEY=your_key`\n\n"
                 "Streamlit Cloud: 在應用程式設置中添加密鑰，設置名稱為 `OPENAI_API_KEY`")
-    elif llm_provider == "bedrock" and (not get_env_variable("AWS_ACCESS_KEY_ID", "") or not get_env_variable("AWS_SECRET_ACCESS_KEY", "")):
+    elif llm_provider == "claude" and not get_env_variable("CLAUDE_API_KEY", ""):
         with st.chat_message("assistant"):
-            st.error("請設置 AWS 憑證才能使用 Amazon Bedrock。")
-        st.info("如何設置 AWS 憑證: \n\n"
-                "本地開發: 在專案根目錄創建.env檔案，然後添加:\n"
-                "`AWS_ACCESS_KEY_ID=your_access_key`\n"
-                "`AWS_SECRET_ACCESS_KEY=your_secret_key`\n"
-                "`AWS_REGION=your_region`\n\n"
-                "Streamlit Cloud: 在應用程式設置中添加上述密鑰")
+            st.error("請設置 Claude API Key 才能使用 Claude 模型。")
+        st.info("如何設置 Claude API Key: \n\n"
+                "本地開發: 在專案根目錄創建.env檔案，然後添加 `CLAUDE_API_KEY=your_key`\n\n"
+                "Streamlit Cloud: 在應用程式設置中添加密鑰，設置名稱為 `CLAUDE_API_KEY`")
     elif llm_provider == "deepseek" and not get_env_variable("DEEPSEEK_API_KEY", ""):
         with st.chat_message("assistant"):
             st.error("請設置 DeepSeek API Key 才能使用 DeepSeek 模型。")

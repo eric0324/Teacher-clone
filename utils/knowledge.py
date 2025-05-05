@@ -79,13 +79,13 @@ def extract_keywords(query):
 def extract_core_question_with_llm(query):
     """使用LLM提取查詢的核心問題和關鍵詞，增強版"""
     try:
-        from openai import OpenAI
+        import openai
         
         openai_api_key = get_env_variable("OPENAI_API_KEY", "")
         if not openai_api_key:
             return {"core_question": query, "keywords": extract_keywords(query)}
             
-        client = OpenAI(api_key=openai_api_key)
+        openai.api_key = openai_api_key
         
         system_prompt = """你是一個專業的文本分析和關鍵詞提取專家。
         你的任務是從用戶的問題中提取最核心的問題和關鍵詞。
@@ -110,9 +110,8 @@ def extract_core_question_with_llm(query):
         llm_model = get_env_variable("LLM_MODEL", "gpt-4o")
         core_extractor_model = get_env_variable("CORE_EXTRACTOR_MODEL", llm_model)
         
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model=core_extractor_model,
-            response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -120,8 +119,29 @@ def extract_core_question_with_llm(query):
             temperature=0.1
         )
         
-        result = response.choices[0].message.content
-        parsed_result = json.loads(result)
+        # 在0.28.1版本中，需要通過不同方式獲取回應內容
+        result = response['choices'][0]['message']['content']
+        
+        # 檢查返回的內容是否為有效的JSON字符串
+        if not result or not result.strip():
+            st.warning("LLM返回了空內容，將使用基本關鍵詞提取")
+            return {"core_question": query, "keywords": extract_keywords(query)}
+            
+        try:
+            # 嘗試清理JSON字符串，移除非JSON部分
+            json_start = result.find('{')
+            json_end = result.rfind('}') + 1
+            
+            if json_start >= 0 and json_end > json_start:
+                clean_json = result[json_start:json_end]
+                parsed_result = json.loads(clean_json)
+            else:
+                # 如果沒有找到JSON結構，直接使用原始結果
+                parsed_result = json.loads(result)
+                
+        except json.JSONDecodeError as je:
+            st.warning(f"無法解析LLM返回的JSON: {str(je)}，將使用基本關鍵詞提取")
+            return {"core_question": query, "keywords": extract_keywords(query)}
         
         # 確保回傳結果至少包含基本字段
         if 'keywords' not in parsed_result:

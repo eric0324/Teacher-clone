@@ -1,12 +1,10 @@
 streamlit==1.36.0
-langchain==0.1.11
-langchain-openai==0.1.5
-langchain-community==0.0.25
-openai==1.16.1
+openai==0.28.1
 pypdf==4.1.0
 python-dotenv==1.0.1
 supabase==1.0.3
 requests==2.31.0 
-boto3==1.35.0
+anthropic==0.18.1
+httpx>=0.23.0,<0.24.0
 streamlit-chat==0.1.1
 streamlit-extras==0.2.1
