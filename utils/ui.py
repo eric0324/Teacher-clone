@@ -31,28 +31,31 @@ def setup_ui():
         border-collapse: collapse;
         margin: 16px 0;
         font-size: 0.9em;
+        background-color: white;
+        border: 1px solid #000;
     }
 
     th {
-        background-color: #f8f9fa;
+        background-color: white;
         color: #333;
         font-weight: bold;
         text-align: left;
         padding: 10px;
-        border: 1px solid #e0e0e0;
+        border: 1px solid #000;
     }
 
     td {
         padding: 8px 10px;
-        border: 1px solid #e0e0e0;
+        border: 1px solid #000;
+        background-color: white;
     }
 
     tr:nth-child(even) {
-        background-color: #f8f9fa;
+        background-color: white;
     }
 
     tr:hover {
-        background-color: #f1f3f4;
+        background-color: white;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -154,4 +157,4 @@ def display_chat_history():
     """顯示對話歷史"""
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.write(message["content"]) 
+            st.markdown(message["content"], unsafe_allow_html=True) 
