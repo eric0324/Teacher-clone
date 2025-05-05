@@ -69,7 +69,7 @@ def setup_sidebar():
         voyage_model = get_env_variable("VOYAGE_MODEL", "voyage-2")
         
         # LLM 供應商選擇
-        llm_provider_options = ["deepseek", "claude", "openai"]
+        llm_provider_options = ["claude", "deepseek", "openai"]
         selected_provider = st.selectbox(
             "選擇大語言模型供應商", 
             llm_provider_options,
@@ -104,7 +104,7 @@ def setup_sidebar():
                 "claude-3-sonnet-20240229-v1",
                 "claude-3-haiku-20240307-v1"
             ]
-            claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-5-sonnet-20240620-v1")
+            claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")
             selected_claude_model = st.selectbox(
                 "選擇 Claude 模型", 
                 claude_models, 

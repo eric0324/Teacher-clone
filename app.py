@@ -38,7 +38,7 @@ if "knowledge_table" not in st.session_state:
     st.session_state.knowledge_table = get_env_variable("KNOWLEDGE_TABLE", "knowledge_base")  
 
 if "llm_provider" not in st.session_state:
-    st.session_state.llm_provider = "deepseek"  # 預設使用 DeepSeek
+    st.session_state.llm_provider = "claude"  # 預設使用 Claude
 
 if "use_streaming" not in st.session_state:
     st.session_state.use_streaming = True  # 預設啟用串流回應
@@ -192,7 +192,7 @@ def generate_response(messages):
             )
             return response_text
     elif llm_provider == "claude":
-        claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-5-sonnet-20240620-v1")
+        claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")
         if use_streaming:
             response, _ = generate_claude_response(
                 messages=messages,

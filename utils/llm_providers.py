@@ -81,7 +81,7 @@ def generate_claude_response(messages, model, streaming=False):
                     messages=formatted_messages,
                     system=system_content,
                     temperature=llm_temperature,
-                    max_tokens=4000,
+                    max_tokens=8000,
                     stream=True
                 )
                 return response, "串流"
@@ -92,7 +92,7 @@ def generate_claude_response(messages, model, streaming=False):
                     messages=formatted_messages,
                     system=system_content,
                     temperature=llm_temperature,
-                    max_tokens=4000
+                    max_tokens=8000
                 )
                 return response.content[0].text, "成功"
                 
