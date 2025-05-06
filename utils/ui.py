@@ -57,6 +57,31 @@ def setup_ui():
     tr:hover {
         background-color: white;
     }
+
+    /* 建議問題按鈕樣式 */
+    div[data-testid="stButton"] button {
+        border-radius: 12px;
+        background-color: #f0f2f6;
+        border: 1px solid #e0e0e0;
+        color: #333;
+        font-size: 0.9em;
+        margin-bottom: 8px;
+        width: 100%;
+        height: auto;
+        min-height: 55px;
+        text-align: left;
+        padding: 8px 12px;
+        transition: all 0.3s ease;
+        white-space: normal;
+        line-height: 1.4;
+    }
+
+    div[data-testid="stButton"] button:hover {
+        background-color: #e6e9ef;
+        border-color: #bbb;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
     </style>
     """, unsafe_allow_html=True)
 

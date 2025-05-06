@@ -230,11 +230,59 @@ def display_streaming_response(stream_response, message_placeholder):
     return full_response
 
 
-# 輸入框
-prompt = st.chat_input("請輸入您的問題...")
+# 初始化建議問題按鈕狀態
+if "show_suggestion_buttons" not in st.session_state:
+    st.session_state.show_suggestion_buttons = True
+
+# 添加一個會話狀態變量來保存用戶選擇的建議問題
+if "suggestion_prompt" not in st.session_state:
+    st.session_state.suggestion_prompt = None
+
+# 檢查是否有來自建議問題的提問
+prompt_from_suggestion = None
+if st.session_state.suggestion_prompt:
+    prompt_from_suggestion = st.session_state.suggestion_prompt
+    st.session_state.suggestion_prompt = None  # 清除建議問題，避免重複處理
+
+# 輸入框 - 始終顯示輸入框
+prompt_from_input = st.chat_input("請輸入您的問題...")
+
+# 決定要使用哪個提示
+prompt = prompt_from_suggestion if prompt_from_suggestion else prompt_from_input
+
+# 顯示建議問題按鈕
+if st.session_state.show_suggestion_buttons:
+    st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+    
+    suggestion_col1, suggestion_col2 = st.columns(2)
+    
+    with suggestion_col1:
+        if st.button("請用峰值體驗邏輯幫我做完整洞察分析"):
+            st.session_state.suggestion_prompt = "請用峰值體驗邏輯幫我做完整洞察分析"
+            st.session_state.show_suggestion_buttons = False
+            st.rerun()
+            
+        if st.button("請依洞察→策略→落地三步驟為我設計方案"):
+            st.session_state.suggestion_prompt = "請依洞察→策略→落地三步驟為我設計方案"
+            st.session_state.show_suggestion_buttons = False
+            st.rerun()
+            
+    with suggestion_col2:
+        if st.button("幫我制定符合品牌輪與X畫布的成長策略"):
+            st.session_state.suggestion_prompt = "幫我制定符合品牌輪與X畫布的成長策略"
+            st.session_state.show_suggestion_buttons = False
+            st.rerun()
+            
+        if st.button("針對我的品牌，做最大增長、最快增長、複利增長規劃"):
+            st.session_state.suggestion_prompt = "針對我的品牌，做最大增長、最快增長、複利增長規劃"
+            st.session_state.show_suggestion_buttons = False
+            st.rerun()
 
 # 處理用戶輸入
 if prompt:
+    # 當用戶輸入問題時，隱藏建議問題按鈕
+    st.session_state.show_suggestion_buttons = False
+    
     # 清空狀態歷史
     st.session_state.status_history = []
     
