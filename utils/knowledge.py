@@ -183,7 +183,7 @@ def extract_core_question_with_llm(query):
             "keywords": extract_keywords(query)
         }
 
-def search_knowledge(query, match_threshold=0.7, match_count=10):
+def search_knowledge(query, match_threshold=0.7, match_count=10, rpc_func="match_knowledge_wang"):
     """從向量知識庫中搜索相關的知識點，使用多種策略提高命中率"""
     from utils.config import get_env_variable
     import streamlit as st
@@ -319,7 +319,7 @@ def search_knowledge(query, match_threshold=0.7, match_count=10):
         
         # 3. 使用向量搜索進行相似性搜索 - 使用核心問題的向量，更能捕捉語義
         result = supabase.rpc(
-            "match_knowledge", 
+            rpc_func, 
             {
                 "query_embedding": query_embedding,
                 "match_threshold": match_threshold,
@@ -337,7 +337,7 @@ def search_knowledge(query, match_threshold=0.7, match_count=10):
         # 後續向量搜索降低閾值的部分保持不變
         if len(all_results) < max(3, match_count // 2) and match_threshold > 0.5:
             lower_threshold_result = supabase.rpc(
-                "match_knowledge", 
+                rpc_func, 
                 {
                     "query_embedding": query_embedding,
                     "match_threshold": 0.5,  # 降低閾值
@@ -354,7 +354,7 @@ def search_knowledge(query, match_threshold=0.7, match_count=10):
         # 如果還是找不到足夠結果，再降低閾值到更低
         if len(all_results) < max(2, match_count // 3) and match_threshold > 0.3:
             lowest_threshold_result = supabase.rpc(
-                "match_knowledge", 
+                rpc_func, 
                 {
                     "query_embedding": query_embedding,
                     "match_threshold": 0.3,  # 極低閾值

@@ -66,7 +66,7 @@ streamlit run app.py
 create extension if not exists vector;
 
 -- 創建匹配函數
-create or replace function match_knowledge(
+create or replace function match_knowledge_TABLE_NAME(
   query_embedding vector(1536),
   match_threshold float,
   match_count int

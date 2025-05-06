@@ -84,6 +84,7 @@ def rag_with_status(query, update_status):
         update_status("正在從知識庫尋找相關資訊...")
         try:
             knowledge_points = search_knowledge(core_question)
+            print('找到', knowledge_points)
             st.session_state.last_knowledge_points = knowledge_points
         except Exception as e:
             update_status(f"搜索知識庫時出錯: {str(e)}，將直接使用AI生成回答")
