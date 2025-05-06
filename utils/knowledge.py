@@ -77,89 +77,110 @@ def extract_keywords(query):
     return keywords
 
 def extract_core_question_with_llm(query):
-    """使用LLM提取查詢的核心問題和關鍵詞，增強版"""
+    """使用LLM提取查詢的核心問題和關鍵詞"""
     try:
-        import openai
-        
-        openai_api_key = get_env_variable("OPENAI_API_KEY", "")
-        if not openai_api_key:
-            return {"core_question": query, "keywords": extract_keywords(query)}
-            
-        openai.api_key = openai_api_key
-        
-        system_prompt = """你是一個專業的文本分析和關鍵詞提取專家。
-        你的任務是從用戶的問題中提取最核心的問題和關鍵詞。
-        
-        請遵循這些規則：
-        1. 移除所有禮貌用語、修飾詞和冗餘內容
-        2. 保留專有名詞和技術術語的完整形式
-        3. 提取可以用於搜索的有效關鍵詞，不要包含太常見或無意義的詞語
-        4. 為了提高召回率，同時提供同義詞或相關詞
-        5. 識別查詢中的核心意圖和主題
-        
-        請以JSON格式返回結果，包含以下字段：
-        1. core_question: 精簡後的核心問題（主要查詢意圖）
-        2. keywords: 主要關鍵詞列表（按重要性排序）
-        3. synonyms: 關鍵詞的同義詞或相關詞（擴展查詢範圍用）
-        4. entity_types: 識別出的實體類型（如：產品、人名、技術、概念等）
-        """
-        
-        user_prompt = f"請分析這個問題並提取核心問題和關鍵詞資訊：{query}"
-        
-        # 優先使用與主模型相同的設定，如果沒有設定則使用預設值
-        llm_model = get_env_variable("LLM_MODEL", "gpt-4o")
-        core_extractor_model = get_env_variable("CORE_EXTRACTOR_MODEL", llm_model)
-        
-        response = openai.ChatCompletion.create(
-            model=core_extractor_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.1
+        from utils.llm_providers import (
+            generate_openai_response, 
+            generate_claude_response, 
+            generate_deepseek_response
         )
         
-        # 在0.28.1版本中，需要通過不同方式獲取回應內容
-        result = response['choices'][0]['message']['content']
+        # 檢查當前設定的LLM提供者
+        llm_provider = st.session_state.get('llm_provider', 'claude')  # 預設使用 Claude
         
-        # 檢查返回的內容是否為有效的JSON字符串
-        if not result or not result.strip():
-            st.warning("LLM返回了空內容，將使用基本關鍵詞提取")
+        # 構建查詢訊息
+        system_prompt = """
+        role: 關鍵詞提取專家
+        instructions:
+            primary_task: 從使用者問題中提取最核心的問題和關鍵詞
+            rules:
+                - 移除所有禮貌用語、修飾詞和冗餘內容
+                - 提取可以用於向量搜索的有效關鍵詞
+                - 保留專有名詞和技術術語
+        output_format:
+            type: json
+            structure:
+                core_question: 精簡後的核心問題
+                keywords: 
+                - 主要關鍵詞列表
+        examples:
+            output: |
+                {
+                    "core_question": "人工智能在醫療領域的應用",
+                    "keywords": ["人工智能", "醫療", "應用"]
+                }
+
+        response_requirements:
+            format: json
+            structure_validation: true
+            content_focus: only extracted information
+        """
+        
+        user_prompt = f"提取這個問題的核心問題和關鍵詞：{query}"
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        # 根據設定的提供者來產生回應
+        if llm_provider == "openai":
+            llm_model = get_env_variable("LLM_MODEL", "gpt-4o")
+            response_text, _ = generate_openai_response(
+                messages=messages,
+                model=llm_model,
+                streaming=False
+            )
+        elif llm_provider == "claude":
+            claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")
+            response_text, _ = generate_claude_response(
+                messages=messages,
+                model=claude_model,
+                streaming=False
+            )
+        elif llm_provider == "deepseek":
+            deepseek_model = get_env_variable("DEEPSEEK_MODEL", "deepseek-chat")
+            response_text, _ = generate_deepseek_response(
+                messages=messages,
+                model_id=deepseek_model,
+                streaming=False
+            )
+        else:
+            # 如果沒有有效的提供者，回退到基本方法
+            return {"core_question": query, "keywords": extract_keywords(query)}
+        
+        # 處理回應
+        if not response_text or isinstance(response_text, str) and not response_text.strip():
             return {"core_question": query, "keywords": extract_keywords(query)}
             
         try:
-            # 嘗試清理JSON字符串，移除非JSON部分
-            json_start = result.find('{')
-            json_end = result.rfind('}') + 1
-            
-            if json_start >= 0 and json_end > json_start:
-                clean_json = result[json_start:json_end]
-                parsed_result = json.loads(clean_json)
-            else:
-                # 如果沒有找到JSON結構，直接使用原始結果
-                parsed_result = json.loads(result)
+            # 嘗試解析JSON回應
+            if isinstance(response_text, str):
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
                 
-        except json.JSONDecodeError as je:
-            st.warning(f"無法解析LLM返回的JSON: {str(je)}，將使用基本關鍵詞提取")
+                if json_start >= 0 and json_end > json_start:
+                    clean_json = response_text[json_start:json_end]
+                    parsed_result = json.loads(clean_json)
+                else:
+                    parsed_result = json.loads(response_text)
+            else:
+                # 可能已經是解析過的物件
+                parsed_result = response_text
+                
+        except json.JSONDecodeError:
             return {"core_question": query, "keywords": extract_keywords(query)}
         
-        # 確保回傳結果至少包含基本字段
+        # 確保回傳結果包含關鍵詞
         if 'keywords' not in parsed_result:
             parsed_result['keywords'] = extract_keywords(query)
-        
-        if 'synonyms' in parsed_result:
-            # 添加同義詞到關鍵詞列表，擴大搜索範圍
-            parsed_result['keywords'].extend([syn for syn in parsed_result['synonyms'] 
-                                             if syn not in parsed_result['keywords']])
         
         return parsed_result
     except Exception as e:
         st.error(f"使用LLM提取核心問題時出錯: {str(e)}")
-        # 如果LLM處理失敗，回退到原始的關鍵詞提取方法
-        fallback_keywords = extract_keywords(query)
         return {
             "core_question": query,
-            "keywords": fallback_keywords
+            "keywords": extract_keywords(query)
         }
 
 def search_knowledge(query, match_threshold=0.7, match_count=10):
