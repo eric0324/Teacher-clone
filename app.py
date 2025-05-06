@@ -110,10 +110,17 @@ def generate_answer(query, context, update_status):
         # 獲取系統提示詞
         system_content = st.session_state.custom_prompt
         
+        # 獲取最近 memory_length 條對話歷史
+        chat_history = st.session_state.messages[-st.session_state.memory_length*2:] if len(st.session_state.messages) > 0 else []
+
         # 構建消息
         messages = [{"role": "system", "content": system_content}]
-        
-        # 直接添加當前問題和上下文
+
+        # 添加歷史訊息
+        for message in chat_history:
+            messages.append(message)
+
+        # 添加當前問題和上下文
         augmented_prompt = f"問題: {query}\n\n相關知識:\n{context}"
         messages.append({"role": "user", "content": augmented_prompt})
         
