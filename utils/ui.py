@@ -129,12 +129,6 @@ def setup_sidebar():
         # 進階設置
         with st.expander("進階設置"):
             st.session_state.knowledge_table = st.text_input("知識庫資料表名稱", value=st.session_state.knowledge_table)
-            llm_temperature = st.slider("AI 回答溫度", min_value=0.0, max_value=1.0, value=float(get_env_variable("LLM_TEMPERATURE", "0.3")), step=0.1)
-            
-            # 添加記憶長度設置
-            memory_length = st.slider("對話記憶長度", min_value=1, max_value=10, value=st.session_state.memory_length, step=1)
-            if memory_length != st.session_state.memory_length:
-                st.session_state.memory_length = memory_length
             
             # 輸入系統提示詞名稱
             prompt_name = st.text_input("系統提示詞名稱", value=st.session_state.prompt_name)
@@ -151,6 +145,13 @@ def setup_sidebar():
                     st.error(f"無法載入提示詞: {prompt_name}")
                     with st.expander("除錯資訊"):
                         st.warning("未能從 Supabase 獲取提示詞，請檢查數據庫連接及提示詞名稱是否正確")
+                        
+            st.slider("AI 回答溫度", min_value=0.0, max_value=1.0, value=float(get_env_variable("LLM_TEMPERATURE", "0.3")), step=0.1)
+            
+            # 添加記憶長度設置
+            memory_length = st.slider("對話記憶長度", min_value=1, max_value=10, value=st.session_state.memory_length, step=1)
+            if memory_length != st.session_state.memory_length:
+                st.session_state.memory_length = memory_length
         
         # 添加登出按鈕
         if st.button("登出"):
