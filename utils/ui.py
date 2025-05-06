@@ -136,14 +136,21 @@ def setup_sidebar():
             if memory_length != st.session_state.memory_length:
                 st.session_state.memory_length = memory_length
             
-            # 輸入系統提示詞檔案名稱
-            prompt_filename = st.text_input("系統提示詞檔案名稱", value=st.session_state.prompt_filename)
-            if prompt_filename != st.session_state.prompt_filename:
-                st.session_state.prompt_filename = prompt_filename
-                new_prompt = load_system_prompt(prompt_filename)
+            # 輸入系統提示詞名稱
+            prompt_name = st.text_input("系統提示詞名稱", value=st.session_state.prompt_name)
+            if prompt_name != st.session_state.prompt_name:
+                st.session_state.prompt_name = prompt_name
+                new_prompt = load_system_prompt(prompt_name)
                 if new_prompt:
                     st.session_state.custom_prompt = new_prompt
-                    st.success(f"已載入提示詞檔案: {prompt_filename}")
+                    st.success(f"已載入提示詞: {prompt_name}")
+                    # 顯示載入的提示詞內容
+                    with st.expander("查看提示詞內容"):
+                        st.text_area("系統提示詞", value=new_prompt, height=200, disabled=True)
+                else:
+                    st.error(f"無法載入提示詞: {prompt_name}")
+                    with st.expander("除錯資訊"):
+                        st.warning("未能從 Supabase 獲取提示詞，請檢查數據庫連接及提示詞名稱是否正確")
         
         # 添加登出按鈕
         if st.button("登出"):

@@ -81,27 +81,29 @@ def load_config():
             
     return config
 
-def load_system_prompt(prompt_filename="wang.txt"):
-    """從 system_prompts 資料夾載入系統提示詞檔案"""
-    prompt_folder = Path("system_prompts")
-    prompt_file = prompt_folder / prompt_filename
+def load_system_prompt(prompt_name="wang"):
+    """從 system_prompts 資料表或資料夾載入系統提示詞"""
+    import streamlit as st
     
-    if not prompt_folder.exists():
+    # 嘗試從Supabase獲取系統提示詞
+    supabase = st.session_state.get('supabase')
+    if supabase:
         try:
-            prompt_folder.mkdir(exist_ok=True)
-            st.warning(f"已建立 {prompt_folder} 資料夾，但尚未包含提示詞檔案")
-            return ""
+            # 從system_prompts資料表獲取指定名稱的系統提示詞
+            result = supabase.table("system_prompts").select("*").eq("name", prompt_name).execute()
+         
+            # 檢查是否找到結果
+            if hasattr(result, 'data') and result.data:
+                # 顯示找到的系統提示詞
+                system_prompt = result.data[0]['system_prompt']
+                # 返回找到的系統提示詞
+                return system_prompt
+            else:
+                st.warning(f"在資料庫中找不到名稱為 {prompt_name} 的系統提示詞")
+                return None
         except Exception as e:
-            st.error(f"無法建立 system_prompts 資料夾: {str(e)}")
-            return ""
-            
-    if not prompt_file.exists():
-        st.warning(f"找不到提示詞檔案 {prompt_file}，請確保該檔案存在")
-        return ""
-        
-    try:
-        with open(prompt_file, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception as e:
-        st.error(f"讀取提示詞檔案時出錯: {str(e)}")
-        return "" 
+            st.error(f"從資料庫獲取系統提示詞時出錯: {str(e)}")
+            return None
+    else:
+        st.warning("未設定 Supabase 連接，無法從資料庫獲取系統提示詞")
+        return None

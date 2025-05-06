@@ -106,8 +106,8 @@ def extract_core_question_with_llm(query):
         examples:
             output: |
                 {
-                    "core_question": "人工智能在醫療領域的應用",
-                    "keywords": ["人工智能", "醫療", "應用"]
+                    "core_question": "人工智慧在醫療領域的應用",
+                    "keywords": ["人工智慧", "醫療", "應用"]
                 }
 
         response_requirements:
@@ -126,25 +126,102 @@ def extract_core_question_with_llm(query):
         # 根據設定的提供者來產生回應
         if llm_provider == "openai":
             llm_model = get_env_variable("LLM_MODEL", "gpt-4o")
-            response_text, _ = generate_openai_response(
+            response, response_type = generate_openai_response(
                 messages=messages,
-                model=llm_model,
-                streaming=False
+                model=llm_model
             )
+            
+            # 處理OpenAI的串流響應
+            if response_type == "串流" and not isinstance(response, str):
+                # 處理OpenAI串流響應
+                full_text = ""
+                try:
+                    for chunk in response:
+                        if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
+                            if hasattr(chunk.choices[0], 'delta') and hasattr(chunk.choices[0].delta, 'content'):
+                                content = chunk.choices[0].delta.content
+                                if content:
+                                    full_text += content
+                            elif hasattr(chunk.choices[0], 'text'):
+                                # 舊版API可能使用text而非content
+                                content = chunk.choices[0].text
+                                if content:
+                                    full_text += content
+                    response_text = full_text
+                except Exception as e:
+                    return {"core_question": query, "keywords": extract_keywords(query)}
+            else:
+                # 處理錯誤或直接回應
+                response_text = response
+                if not response_text or not isinstance(response_text, str):
+                    return {"core_question": query, "keywords": extract_keywords(query)}
+                
         elif llm_provider == "claude":
             claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")
-            response_text, _ = generate_claude_response(
+            response, response_type = generate_claude_response(
                 messages=messages,
-                model=claude_model,
-                streaming=False
+                model=claude_model
             )
+            
+            # 處理Claude的串流響應
+            if response_type == "串流" and not isinstance(response, str):
+                # 處理Claude串流響應
+                full_text = ""
+                try:
+                    for chunk in response:
+                        # 處理不同類型的事件和結構
+                        if hasattr(chunk, 'type'):
+                            # 處理content_block_delta事件
+                            if chunk.type == 'content_block_delta' and hasattr(chunk, 'delta'):
+                                if hasattr(chunk.delta, 'type') and chunk.delta.type == 'text_delta':
+                                    if hasattr(chunk.delta, 'text'):
+                                        content = chunk.delta.text
+                                        if content:
+                                            full_text += content
+                            # Claude 2.x 舊版API
+                            elif chunk.type == 'completion' and hasattr(chunk, 'completion'):
+                                content = chunk.completion
+                                if content:
+                                    full_text += content
+                    response_text = full_text
+                except Exception as e:
+                    return {"core_question": query, "keywords": extract_keywords(query)}
+            else:
+                # 處理錯誤或直接回應
+                response_text = response
+                if not response_text or not isinstance(response_text, str):
+                    return {"core_question": query, "keywords": extract_keywords(query)}
+                
         elif llm_provider == "deepseek":
             deepseek_model = get_env_variable("DEEPSEEK_MODEL", "deepseek-chat")
-            response_text, _ = generate_deepseek_response(
+            response, response_type = generate_deepseek_response(
                 messages=messages,
-                model_id=deepseek_model,
-                streaming=False
+                model_id=deepseek_model
             )
+            
+            # 處理DeepSeek的響應 - 可能是串流或錯誤
+            if response_type == "串流" and not isinstance(response, str):
+                # 手動處理串流響應抓取完整內容
+                full_text = ""
+                try:
+                    for line in response.iter_lines():
+                        if line:
+                            line = line.decode('utf-8')
+                            if line.startswith('data: ') and line != 'data: [DONE]':
+                                json_data = json.loads(line[6:])
+                                if 'choices' in json_data and json_data['choices'] and 'delta' in json_data['choices'][0]:
+                                    content = json_data['choices'][0]['delta'].get('content', '')
+                                    if content:
+                                        full_text += content
+                    response_text = full_text
+                except Exception as e:
+                    return {"core_question": query, "keywords": extract_keywords(query)}
+            else:
+                # 處理錯誤或其他情況 - 可能是字符串錯誤消息
+                response_text = response
+                
+                if not response_text or not isinstance(response_text, str):
+                    return {"core_question": query, "keywords": extract_keywords(query)}
         else:
             # 如果沒有有效的提供者，回退到基本方法
             return {"core_question": query, "keywords": extract_keywords(query)}
