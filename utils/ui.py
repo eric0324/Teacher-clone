@@ -88,7 +88,9 @@ def setup_sidebar():
         
         # 根據供應商顯示對應的模型選擇
         if st.session_state.llm_provider == "openai":
-            openai_models = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
+            openai_models = [
+                "gpt-4o"
+            ]
             llm_model = get_env_variable("LLM_MODEL", "gpt-4o")
             selected_openai_model = st.selectbox(
                 "選擇 OpenAI 模型", 
@@ -114,7 +116,9 @@ def setup_sidebar():
                 
         elif st.session_state.llm_provider == "deepseek":
             # DeepSeek 模型選擇
-            deepseek_models = ["deepseek-chat"]
+            deepseek_models = [
+                "deepseek-chat"
+            ]
             deepseek_model = get_env_variable("DEEPSEEK_MODEL", "deepseek-chat")
             selected_deepseek_model = st.selectbox(
                 "選擇 DeepSeek 模型", 
