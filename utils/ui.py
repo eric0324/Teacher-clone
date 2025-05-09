@@ -1,6 +1,7 @@
 import streamlit as st
 from utils.config import get_env_variable, load_system_prompt
 import os
+import streamlit.components.v1 as components
 
 def setup_ui():
     """設置UI樣式和元素"""
@@ -190,7 +191,39 @@ def setup_sidebar():
             st.rerun()
 
 def display_chat_history():
-    """顯示對話歷史"""
+    """顯示聊天歷史紀錄"""
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"], unsafe_allow_html=True) 
+            render_markdown_with_mermaid(message["content"])
+
+def render_markdown_with_mermaid(content, message_placeholder=None):
+    """渲染包含 Mermaid 圖表的 Markdown 內容"""
+    # 檢查內容中是否包含 mermaid 代碼塊
+    if "```mermaid" in content or "```gantt" in content or "```pie" in content:
+        # 包裝在 HTML 中，引入 mermaid.js
+        html = f"""
+        <div id="markdown-content">
+            {content}
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {{
+                mermaid.initialize({{
+                    startOnLoad: true,
+                    theme: 'default',
+                }});
+            }});
+        </script>
+        """
+        if message_placeholder:
+            message_placeholder.empty()
+            with message_placeholder.container():
+                components.html(html, height=600, scrolling=True)
+        else:
+            components.html(html, height=600, scrolling=True)
+    else:
+        # 如果沒有 mermaid 代碼塊，使用普通的 markdown 渲染
+        if message_placeholder:
+            message_placeholder.markdown(content, unsafe_allow_html=True)
+        else:
+            st.markdown(content, unsafe_allow_html=True) 
