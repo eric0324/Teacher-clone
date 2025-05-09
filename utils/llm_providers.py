@@ -3,6 +3,8 @@ import openai
 from anthropic import Anthropic
 from anthropic._exceptions import APIStatusError
 from utils.config import get_env_variable
+import os
+import streamlit as st
 
 def generate_openai_response(messages, model):
     """使用 OpenAI API 生成回答，支援串流和非串流模式"""
@@ -19,7 +21,8 @@ def generate_openai_response(messages, model):
         
         # 依據模型設定適當的 max_tokens
         max_tokens_mapping = {
-            "gpt-4": 16000,
+            "gpt-4o": 16000,
+            "gpt-4.1": 32768,
         }
         max_tokens = max_tokens_mapping.get(model, 16000)
         

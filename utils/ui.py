@@ -114,14 +114,20 @@ def setup_sidebar():
         # 根據供應商顯示對應的模型選擇
         if st.session_state.llm_provider == "openai":
             openai_models = [
+                "gpt-4.1",
                 "gpt-4o"
             ]
-            llm_model = get_env_variable("LLM_MODEL", "gpt-4o")
+            llm_model = get_env_variable("LLM_MODEL", "gpt-4.1")
             selected_openai_model = st.selectbox(
                 "選擇 OpenAI 模型", 
                 openai_models, 
                 index=openai_models.index(llm_model) if llm_model in openai_models else 0
             )
+            
+            # 保存選定的 OpenAI 模型
+            if selected_openai_model != llm_model:
+                os.environ["LLM_MODEL"] = selected_openai_model
+                st.success(f"已切換到 {selected_openai_model} 模型")
         elif st.session_state.llm_provider == "claude":
             claude_models = [
                 "claude-3-7-sonnet-20250219",
