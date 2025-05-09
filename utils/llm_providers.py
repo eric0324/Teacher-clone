@@ -1,9 +1,11 @@
 import requests
+import openai
+from anthropic import Anthropic
+from anthropic._exceptions import APIStatusError
 from utils.config import get_env_variable
 
 def generate_openai_response(messages, model):
     """使用 OpenAI API 生成回答，支援串流和非串流模式"""
-    import openai
     
     openai_api_key = get_env_variable("OPENAI_API_KEY", "")
     llm_temperature = float(get_env_variable("LLM_TEMPERATURE", "0.3"))
@@ -12,28 +14,51 @@ def generate_openai_response(messages, model):
         return "OpenAI API 金鑰未設定", "配置錯誤"
     
     try:
-        # 設置 API 金鑰
-        openai.api_key = openai_api_key
+        # 創建 OpenAI 客戶端
+        client = openai.OpenAI(api_key=openai_api_key)
         
         # 依據模型設定適當的 max_tokens
         max_tokens_mapping = {
-            "gpt-4": 10000,
+            "gpt-4": 16000,
         }
-        max_tokens = max_tokens_mapping.get(model, 10000)
+        max_tokens = max_tokens_mapping.get(model, 16000)
         
-        # 確保所有消息內容不是 None
-        sanitized_messages = []
+        # 處理系統提示
+        system_message = next((msg for msg in messages if msg["role"] == "system"), None)
+        system_content = system_message["content"] if system_message else ""
+        
+        # 構建訊息格式
+        formatted_messages = []
+        
+        # 如果有系統消息，將其添加為第一條消息
+        if system_content:
+            formatted_messages.append({
+                "role": "system",
+                "content": system_content
+            })
+            
+        # 添加其他非系統消息
         for msg in messages:
+            if msg["role"] == "system":
+                continue  # 已經處理過系統消息
+            
+            # 確保消息內容不是 None
             if msg["content"] is None:
-                msg_copy = msg.copy()
-                msg_copy["content"] = ""
-                sanitized_messages.append(msg_copy)
+                msg_copy = {
+                    "role": msg["role"],
+                    "content": ""
+                }
+                formatted_messages.append(msg_copy)
             else:
-                sanitized_messages.append(msg)
+                formatted_messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
         
-        response = openai.ChatCompletion.create(
+        # 使用新版 API 創建聊天完成
+        response = client.chat.completions.create(
             model=model,
-            messages=sanitized_messages,
+            messages=formatted_messages,
             temperature=llm_temperature,
             max_tokens=max_tokens,
             stream=True
@@ -44,9 +69,6 @@ def generate_openai_response(messages, model):
 
 def generate_claude_response(messages, model):
     """使用 Anthropic Claude API 生成回答，支援串流和非串流模式"""
-    from anthropic import Anthropic
-    import time
-    from anthropic._exceptions import APIStatusError
     
     claude_api_key = get_env_variable("CLAUDE_API_KEY", "")
     llm_temperature = float(get_env_variable("LLM_TEMPERATURE", "0.3"))
@@ -129,9 +151,18 @@ def generate_deepseek_response(messages, model_id):
         
         # 構建訊息格式
         formatted_messages = []
+        
+        # 如果有系統消息，將其添加為第一條消息
+        if system_content:
+            formatted_messages.append({
+                "role": "system",
+                "content": system_content
+            })
+            
+        # 添加其他非系統消息
         for msg in messages:
             if msg["role"] == "system":
-                continue  # 系統消息將單獨處理
+                continue  # 已經處理過系統消息
             formatted_messages.append({
                 "role": msg["role"],
                 "content": msg["content"]
@@ -139,10 +170,10 @@ def generate_deepseek_response(messages, model_id):
         
         # 依據模型設定適當的 max_tokens
         max_tokens_mapping = {
-            "deepseek-chat": 8000
+            "deepseek-chat": 16000
         }
         # 獲取該模型的 max_tokens，如果沒找到則默認為 10000
-        max_tokens = max_tokens_mapping.get(model_id, 10000)
+        max_tokens = max_tokens_mapping.get(model_id, 16000)
         
         # 構建請求體
         payload = {
@@ -152,9 +183,6 @@ def generate_deepseek_response(messages, model_id):
             "max_tokens": max_tokens,
             "stream": True
         }
-        
-        if system_content:
-            payload["system"] = system_content
         
         # 發送請求到 DeepSeek API
         response = requests.post(
