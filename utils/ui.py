@@ -2,6 +2,7 @@ import streamlit as st
 from utils.config import get_env_variable, load_system_prompt
 import os
 from streamlit_mermaid import st_mermaid
+import re
 
 def setup_ui():
     """設置UI樣式和元素"""
@@ -190,8 +191,78 @@ def setup_sidebar():
             st.session_state["authentication_status"] = False
             st.rerun()
 
+def fix_markdown_table(content):
+    """修復格式可能不正確的 Markdown 表格"""
+    # 查找表格的模式 - 查找以 | 開頭和結尾的行，後面跟著一行分隔符
+    table_pattern = r'(\|[^\n]+\|(?:\s*\n\|[^\n]+\|)+)'
+    tables = re.findall(table_pattern, content, re.DOTALL)
+    
+    # 如果沒有找到表格，直接返回原始內容
+    if not tables:
+        return content
+    
+    # 處理每個表格
+    for original_table in tables:
+        # 分割表格行
+        lines = original_table.strip().split('\n')
+        if len(lines) < 2:  # 需要至少兩行
+            continue
+            
+        # 解析行，將每行分成單元格
+        parsed_rows = []
+        for line in lines:
+            line = line.strip()
+            if not line.startswith('|') or not line.endswith('|'):
+                continue  # 不是有效的表格行
+                
+            # 去掉開頭和結尾的 |，然後分割
+            cells = [cell.strip() for cell in line[1:-1].split('|')]
+            parsed_rows.append(cells)
+            
+        if len(parsed_rows) < 2:
+            continue  # 沒有足夠的行
+            
+        # 確定列數 (使用第一行的列數)
+        column_count = len(parsed_rows[0])
+        
+        # 檢查第二行是否是分隔符行 (包含 --- 或 :--:)
+        is_second_row_separator = all('-' in cell or ':' in cell for cell in parsed_rows[1])
+        
+        # 準備新的表格行
+        new_table_lines = []
+        
+        # 添加標題行
+        header_cells = parsed_rows[0]
+        new_table_lines.append('| ' + ' | '.join(header_cells) + ' |')
+        
+        # 生成標準分隔行
+        separator_line = '| ' + ' | '.join(['---' for _ in range(column_count)]) + ' |'
+        new_table_lines.append(separator_line)
+        
+        # 添加數據行
+        start_idx = 2 if is_second_row_separator else 1
+        for row in parsed_rows[start_idx:]:
+            # 如果行的單元格數與標題行不同，調整它
+            if len(row) < column_count:
+                row.extend([''] * (column_count - len(row)))
+            elif len(row) > column_count:
+                row = row[:column_count]
+                
+            new_table_lines.append('| ' + ' | '.join(row) + ' |')
+            
+        # 生成修復後的表格
+        fixed_table = '\n'.join(new_table_lines)
+        
+        # 替換原始表格
+        content = content.replace(original_table, fixed_table)
+        
+    return content
+
 def render_mermaid_diagrams(content):
     """從文本中提取並渲染Mermaid圖表，返回處理後的文本"""
+    # 首先修復可能存在的表格問題
+    content = fix_markdown_table(content)
+    
     # 檢查是否包含mermaid圖表
     if "```mermaid" in content or "```pie" in content or "```graph" in content:
         # 分割內容，處理每個部分
