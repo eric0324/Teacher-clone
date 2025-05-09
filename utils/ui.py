@@ -1,6 +1,7 @@
 import streamlit as st
 from utils.config import get_env_variable, load_system_prompt
 import os
+from streamlit_mermaid import st_mermaid
 
 def setup_ui():
     """設置UI樣式和元素"""
@@ -189,8 +190,88 @@ def setup_sidebar():
             st.session_state["authentication_status"] = False
             st.rerun()
 
+def render_mermaid_diagrams(content):
+    """從文本中提取並渲染Mermaid圖表，返回處理後的文本"""
+    # 檢查是否包含mermaid圖表
+    if "```mermaid" in content or "```pie" in content or "```graph" in content:
+        # 分割內容，處理每個部分
+        parts = []
+        current_pos = 0
+        
+        # 尋找mermaid代碼區塊
+        while True:
+            # 查找開始標記
+            start_pos = -1
+            for marker in ["```mermaid", "```pie", "```graph"]:
+                pos = content.find(marker, current_pos)
+                if pos != -1 and (start_pos == -1 or pos < start_pos):
+                    start_pos = pos
+                    start_marker = marker
+            
+            if start_pos == -1:
+                # 沒有找到更多的圖表代碼塊
+                parts.append(content[current_pos:])
+                break
+            
+            # 添加圖表之前的文本
+            if start_pos > current_pos:
+                parts.append(content[current_pos:start_pos])
+            
+            # 查找結束標記
+            end_pos = content.find("```", start_pos + len(start_marker))
+            if end_pos == -1:
+                # 如果沒有找到結束標記，將剩餘內容作為普通文本
+                parts.append(content[start_pos:])
+                break
+            
+            # 提取圖表代碼
+            chart_code = content[start_pos + len(start_marker):end_pos].strip()
+            
+            # 添加圖表的渲染標記
+            parts.append(f"<MERMAID_CHART>{chart_code}</MERMAID_CHART>")
+            
+            # 更新位置
+            current_pos = end_pos + 3
+        
+        # 重新組合內容
+        processed_content = "".join(parts)
+        return processed_content
+    else:
+        return content
+
 def display_chat_history():
     """顯示對話歷史"""
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"], unsafe_allow_html=True) 
+            content = message["content"]
+            # 處理可能包含的mermaid圖表
+            processed_content = render_mermaid_diagrams(content)
+            
+            # 如果內容中有圖表標記，則分別渲染
+            if "<MERMAID_CHART>" in processed_content:
+                parts = processed_content.split("<MERMAID_CHART>")
+                for i, part in enumerate(parts):
+                    if i == 0:
+                        # 第一部分是純文本
+                        if part:
+                            st.markdown(part, unsafe_allow_html=True)
+                    else:
+                        # 查找圖表代碼和後續文本
+                        chart_end = part.find("</MERMAID_CHART>")
+                        if chart_end != -1:
+                            chart_code = part[:chart_end]
+                            remaining_text = part[chart_end + 16:]  # 16是</MERMAID_CHART>的長度
+                            
+                            # 渲染圖表
+                            try:
+                                st_mermaid(chart_code, height=350)
+                            except Exception as e:
+                                st.error(f"圖表渲染失敗: {str(e)}")
+                                st.code(chart_code, language="mermaid")
+                            
+                            # 渲染剩餘文本
+                            if remaining_text:
+                                st.markdown(remaining_text, unsafe_allow_html=True)
+            else:
+                # 沒有圖表，直接渲染
+                st.markdown(content, unsafe_allow_html=True) 

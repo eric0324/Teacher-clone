@@ -1,9 +1,10 @@
 import streamlit as st
 import json
+from streamlit_mermaid import st_mermaid
 
 # 導入自定義模塊
 from utils.config import load_config, get_env_variable, load_system_prompt
-from utils.ui import setup_ui, setup_sidebar, display_chat_history
+from utils.ui import setup_ui, setup_sidebar, display_chat_history, render_mermaid_diagrams
 from utils.auth import check_password
 from utils.knowledge import search_knowledge, extract_core_question_with_llm
 from utils.llm_providers import (
@@ -187,7 +188,38 @@ def display_streaming_response(stream_response, message_placeholder):
                     content = chunk.choices[0].delta.content
                     if content:
                         full_response += content
-                        message_placeholder.markdown(full_response)
+                        # 檢查是否有完整的 mermaid 圖表代碼塊，如果有就渲染
+                        processed_content = render_mermaid_diagrams(full_response)
+                        if "<MERMAID_CHART>" in processed_content:
+                            # 重新渲染整個內容，包括圖表
+                            message_placeholder.empty()
+                            with message_placeholder.container():
+                                parts = processed_content.split("<MERMAID_CHART>")
+                                for i, part in enumerate(parts):
+                                    if i == 0:
+                                        # 第一部分是純文本
+                                        if part:
+                                            st.markdown(part, unsafe_allow_html=True)
+                                    else:
+                                        # 查找圖表代碼和後續文本
+                                        chart_end = part.find("</MERMAID_CHART>")
+                                        if chart_end != -1:
+                                            chart_code = part[:chart_end]
+                                            remaining_text = part[chart_end + 16:]  # 16是</MERMAID_CHART>的長度
+                                            
+                                            # 渲染圖表
+                                            try:
+                                                st_mermaid(chart_code, height=350)
+                                            except Exception as e:
+                                                st.error(f"圖表渲染失敗: {str(e)}")
+                                                st.code(chart_code, language="mermaid")
+                                            
+                                            # 渲染剩餘文本
+                                            if remaining_text:
+                                                st.markdown(remaining_text, unsafe_allow_html=True)
+                        else:
+                            # 普通文本，直接更新
+                            message_placeholder.markdown(full_response)
                 elif hasattr(chunk.choices[0], 'text'):
                     # 舊版 API 可能使用 text 而非 content
                     content = chunk.choices[0].text
@@ -207,7 +239,38 @@ def display_streaming_response(stream_response, message_placeholder):
                             content = chunk.delta.text
                             if content:
                                 full_response += content
-                                message_placeholder.markdown(full_response)
+                                # 檢查是否有完整的 mermaid 圖表代碼塊，如果有就渲染
+                                processed_content = render_mermaid_diagrams(full_response)
+                                if "<MERMAID_CHART>" in processed_content:
+                                    # 重新渲染整個內容，包括圖表
+                                    message_placeholder.empty()
+                                    with message_placeholder.container():
+                                        parts = processed_content.split("<MERMAID_CHART>")
+                                        for i, part in enumerate(parts):
+                                            if i == 0:
+                                                # 第一部分是純文本
+                                                if part:
+                                                    st.markdown(part, unsafe_allow_html=True)
+                                            else:
+                                                # 查找圖表代碼和後續文本
+                                                chart_end = part.find("</MERMAID_CHART>")
+                                                if chart_end != -1:
+                                                    chart_code = part[:chart_end]
+                                                    remaining_text = part[chart_end + 16:]  # 16是</MERMAID_CHART>的長度
+                                                    
+                                                    # 渲染圖表
+                                                    try:
+                                                        st_mermaid(chart_code, height=350)
+                                                    except Exception as e:
+                                                        st.error(f"圖表渲染失敗: {str(e)}")
+                                                        st.code(chart_code, language="mermaid")
+                                                    
+                                                    # 渲染剩餘文本
+                                                    if remaining_text:
+                                                        st.markdown(remaining_text, unsafe_allow_html=True)
+                                else:
+                                    # 普通文本，直接更新
+                                    message_placeholder.markdown(full_response)
                 # Claude 2.x 舊版API
                 elif chunk.type == 'completion' and hasattr(chunk, 'completion'):
                     content = chunk.completion
@@ -227,7 +290,38 @@ def display_streaming_response(stream_response, message_placeholder):
                             content = json_data['choices'][0]['delta'].get('content', '')
                             if content:
                                 full_response += content
-                                message_placeholder.markdown(full_response)
+                                # 檢查是否有完整的 mermaid 圖表代碼塊，如果有就渲染
+                                processed_content = render_mermaid_diagrams(full_response)
+                                if "<MERMAID_CHART>" in processed_content:
+                                    # 重新渲染整個內容，包括圖表
+                                    message_placeholder.empty()
+                                    with message_placeholder.container():
+                                        parts = processed_content.split("<MERMAID_CHART>")
+                                        for i, part in enumerate(parts):
+                                            if i == 0:
+                                                # 第一部分是純文本
+                                                if part:
+                                                    st.markdown(part, unsafe_allow_html=True)
+                                            else:
+                                                # 查找圖表代碼和後續文本
+                                                chart_end = part.find("</MERMAID_CHART>")
+                                                if chart_end != -1:
+                                                    chart_code = part[:chart_end]
+                                                    remaining_text = part[chart_end + 16:]  # 16是</MERMAID_CHART>的長度
+                                                    
+                                                    # 渲染圖表
+                                                    try:
+                                                        st_mermaid(chart_code, height=350)
+                                                    except Exception as e:
+                                                        st.error(f"圖表渲染失敗: {str(e)}")
+                                                        st.code(chart_code, language="mermaid")
+                                                    
+                                                    # 渲染剩餘文本
+                                                    if remaining_text:
+                                                        st.markdown(remaining_text, unsafe_allow_html=True)
+                                else:
+                                    # 普通文本，直接更新
+                                    message_placeholder.markdown(full_response)
         except AttributeError:
             # 如果沒有iter_lines方法，可能是錯誤訊息
             if hasattr(stream_response, 'text'):
