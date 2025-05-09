@@ -112,7 +112,7 @@ def generate_answer(query, context, update_status):
         
         # 獲取最近 memory_length 條對話歷史
         chat_history = st.session_state.messages[-st.session_state.memory_length*2:] if len(st.session_state.messages) > 0 else []
-
+        
         # 構建消息
         messages = [{"role": "system", "content": system_content}]
 
@@ -130,8 +130,6 @@ def generate_answer(query, context, update_status):
             {context}
         </retrieved_knowledge>
         """
-        
-        print(augmented_prompt)
         
         messages.append({"role": "user", "content": augmented_prompt})
         
