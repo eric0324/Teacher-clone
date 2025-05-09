@@ -12,14 +12,18 @@ def check_password():
     if "authentication_status" in st.session_state and st.session_state["authentication_status"]:
         return True
     
+    # 初始化必要的 session_state 變數
+    if "authentication_status" not in st.session_state:
+        st.session_state["authentication_status"] = False
+    
     # 顯示登入表單
     st.title("數位分身系統 (Beta)")
     st.header("登入")
     
     # 使用表單，可以讓用戶按下 Enter 鍵提交
     with st.form("login_form"):
-        username = st.text_input("帳號")
-        password = st.text_input("密碼", type="password")
+        username = st.text_input("帳號", key="username_input")
+        password = st.text_input("密碼", type="password", key="password_input")
         submit_button = st.form_submit_button("登入")
         
         if submit_button:

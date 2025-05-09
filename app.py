@@ -121,7 +121,18 @@ def generate_answer(query, context, update_status):
             messages.append(message)
 
         # 添加當前問題和上下文
-        augmented_prompt = f"問題: {query}\n\n相關知識:\n{context}"
+        augmented_prompt = f"""
+        <message>
+            {query}
+        </message>
+
+        <retrieved_knowledge>
+            {context}
+        </retrieved_knowledge>
+        """
+        
+        print(augmented_prompt)
+        
         messages.append({"role": "user", "content": augmented_prompt})
         
         # 生成回答
@@ -250,33 +261,6 @@ prompt_from_input = st.chat_input("請輸入您的問題...")
 # 決定要使用哪個提示
 prompt = prompt_from_suggestion if prompt_from_suggestion else prompt_from_input
 
-# 顯示建議問題按鈕
-if st.session_state.show_suggestion_buttons:
-    st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
-    
-    suggestion_col1, suggestion_col2 = st.columns(2)
-    
-    with suggestion_col1:
-        if st.button("請用峰值體驗邏輯幫我做完整洞察分析"):
-            st.session_state.suggestion_prompt = "請用峰值體驗邏輯幫我做完整洞察分析"
-            st.session_state.show_suggestion_buttons = False
-            st.rerun()
-            
-        if st.button("請依洞察→策略→落地三步驟為我設計方案"):
-            st.session_state.suggestion_prompt = "請依洞察→策略→落地三步驟為我設計方案"
-            st.session_state.show_suggestion_buttons = False
-            st.rerun()
-            
-    with suggestion_col2:
-        if st.button("幫我制定符合品牌輪與X畫布的成長策略"):
-            st.session_state.suggestion_prompt = "幫我制定符合品牌輪與X畫布的成長策略"
-            st.session_state.show_suggestion_buttons = False
-            st.rerun()
-            
-        if st.button("針對我的品牌，做最大增長、最快增長、複利增長規劃"):
-            st.session_state.suggestion_prompt = "針對我的品牌，做最大增長、最快增長、複利增長規劃"
-            st.session_state.show_suggestion_buttons = False
-            st.rerun()
 
 # 處理用戶輸入
 if prompt:
