@@ -3,7 +3,7 @@ import json
 
 # 導入自定義模塊
 from utils.config import load_config, get_env_variable, load_system_prompt
-from utils.ui import setup_ui, setup_sidebar, display_chat_history, render_markdown_with_mermaid
+from utils.ui import setup_ui, setup_sidebar, display_chat_history
 from utils.auth import check_password
 from utils.knowledge import search_knowledge, extract_core_question_with_llm
 from utils.llm_providers import (
@@ -176,7 +176,7 @@ def display_streaming_response(stream_response, message_placeholder):
     
     # 檢查是否是字符串(錯誤信息)
     if isinstance(stream_response, str):
-        render_markdown_with_mermaid(stream_response, message_placeholder)
+        message_placeholder.markdown(stream_response)
         return stream_response
     
     if llm_provider == "openai":
@@ -187,13 +187,13 @@ def display_streaming_response(stream_response, message_placeholder):
                     content = chunk.choices[0].delta.content
                     if content:
                         full_response += content
-                        render_markdown_with_mermaid(full_response, message_placeholder)
+                        message_placeholder.markdown(full_response)
                 elif hasattr(chunk.choices[0], 'text'):
                     # 舊版 API 可能使用 text 而非 content
                     content = chunk.choices[0].text
                     if content:
                         full_response += content
-                        render_markdown_with_mermaid(full_response, message_placeholder)
+                        message_placeholder.markdown(full_response)
     
     elif llm_provider == "claude":
         # 處理 Claude 串流
@@ -207,13 +207,13 @@ def display_streaming_response(stream_response, message_placeholder):
                             content = chunk.delta.text
                             if content:
                                 full_response += content
-                                render_markdown_with_mermaid(full_response, message_placeholder)
+                                message_placeholder.markdown(full_response)
                 # Claude 2.x 舊版API
                 elif chunk.type == 'completion' and hasattr(chunk, 'completion'):
                     content = chunk.completion
                     if content:
                         full_response += content
-                        render_markdown_with_mermaid(full_response, message_placeholder)
+                        message_placeholder.markdown(full_response)
     
     elif llm_provider == "deepseek":
         # 處理 DeepSeek 串流
@@ -227,13 +227,13 @@ def display_streaming_response(stream_response, message_placeholder):
                             content = json_data['choices'][0]['delta'].get('content', '')
                             if content:
                                 full_response += content
-                                render_markdown_with_mermaid(full_response, message_placeholder)
+                                message_placeholder.markdown(full_response)
         except AttributeError:
             # 如果沒有iter_lines方法，可能是錯誤訊息
             if hasattr(stream_response, 'text'):
-                render_markdown_with_mermaid(stream_response.text, message_placeholder)
+                message_placeholder.markdown(stream_response.text)
                 return stream_response.text
-            render_markdown_with_mermaid(str(stream_response), message_placeholder)
+            message_placeholder.markdown(str(stream_response))
             return str(stream_response)
     
     return full_response
