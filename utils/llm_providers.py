@@ -170,10 +170,10 @@ def generate_deepseek_response(messages, model_id):
         
         # 依據模型設定適當的 max_tokens
         max_tokens_mapping = {
-            "deepseek-chat": 16000
+            "deepseek-chat": 8000
         }
         # 獲取該模型的 max_tokens，如果沒找到則默認為 10000
-        max_tokens = max_tokens_mapping.get(model_id, 16000)
+        max_tokens = max_tokens_mapping.get(model_id, 8000)
         
         # 構建請求體
         payload = {
