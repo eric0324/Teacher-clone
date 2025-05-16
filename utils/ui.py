@@ -99,7 +99,7 @@ def setup_sidebar():
         voyage_model = get_env_variable("VOYAGE_MODEL", "voyage-2")
         
         # LLM 供應商選擇
-        llm_provider_options = ["claude", "deepseek", "openai"]
+        llm_provider_options = ["claude", "deepseek", "gemini", "openai"]
         selected_provider = st.selectbox(
             "選擇大語言模型供應商", 
             llm_provider_options,
@@ -146,6 +146,22 @@ def setup_sidebar():
             if selected_claude_model != claude_model:
                 os.environ["CLAUDE_MODEL"] = selected_claude_model
                 st.success(f"已切換到 {selected_claude_model} 模型")
+        elif st.session_state.llm_provider == "gemini":
+            # Gemini 模型選擇
+            gemini_models = [
+                "gemini-2.0-flash"
+            ]
+            gemini_model = get_env_variable("GEMINI_MODEL", "gemini-1.5-flash")
+            selected_gemini_model = st.selectbox(
+                "選擇 Gemini 模型", 
+                gemini_models, 
+                index=gemini_models.index(gemini_model) if gemini_model in gemini_models else 0
+            )
+            
+            # 保存選定的 Gemini 模型
+            if selected_gemini_model != gemini_model:
+                os.environ["GEMINI_MODEL"] = selected_gemini_model
+                st.success(f"已切換到 {selected_gemini_model} 模型")
                 
         elif st.session_state.llm_provider == "deepseek":
             # DeepSeek 模型選擇

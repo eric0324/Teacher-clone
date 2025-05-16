@@ -3,8 +3,8 @@ import openai
 from anthropic import Anthropic
 from anthropic._exceptions import APIStatusError
 from utils.config import get_env_variable
-import os
-import streamlit as st
+from google import genai
+from google.genai import types
 
 def generate_openai_response(messages, model):
     """使用 OpenAI API 生成回答，支援串流和非串流模式"""
@@ -133,6 +133,124 @@ def generate_claude_response(messages, model):
     # 如果所有重試都失敗
     return "所有重試都失敗，Claude API 目前可能不可用", "錯誤"
 
+def generate_gemini_response(messages, model):
+    """使用 Google Gemini API 生成回答，支援串流和非串流模式"""
+    gemini_api_key = get_env_variable("GEMINI_API_KEY", "")
+    llm_temperature = float(get_env_variable("LLM_TEMPERATURE", "0.3"))
+    
+    if not gemini_api_key:
+        return "Gemini API 金鑰未設定", "配置錯誤"
+    allowed_models = ["gemini-2.0-flash"]
+    
+    # 設定重試機制
+    max_retries = 3
+    retry_count = 0
+    
+    # 嘗試使用非串流模式 (如果串流模式失敗)
+    use_non_streaming = False
+    
+    while retry_count < max_retries:
+        try:
+            client = genai.Client(api_key=gemini_api_key)
+            
+            system_message = next((msg for msg in messages if msg["role"] == "system"), None)
+            system_content = system_message["content"] if system_message else None
+            
+            contents = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    continue
+                
+                role = msg["role"]
+                if role == "assistant":
+                    role = "model"
+                    
+                contents.append({
+                    "role": role,
+                    "parts": [{"text": msg["content"]}]
+                })
+            
+            # 使用串流模式
+            response = client.models.generate_content_stream(
+                model=model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_content,
+                    max_output_tokens=8000,  # 增加最大輸出令牌數
+                    temperature=llm_temperature
+                )
+            )
+            
+            # 測試是否真的能夠迭代（提前檢測，避免後面出錯）
+            try:
+                # 只獲取一個元素確認可以迭代，但不消耗整個生成器
+                iterator = iter(response)
+                first_chunk = next(iterator, None)
+                
+                # 如果成功獲取第一個元素，創建一個新的生成器包含這個元素和原始迭代器的剩餘部分
+                if first_chunk is not None:
+                    def combined_generator():
+                        yield first_chunk  # 先返回第一個已經讀取的元素
+                        for chunk in iterator:  # 然後返回剩餘的元素
+                            yield chunk
+                    
+                    return combined_generator(), "串流"
+                else:
+                    # 可迭代但為空
+                    return "無法產生內容，請重新嘗試", "錯誤"
+            except (TypeError, AttributeError):
+                # 如果不可迭代，返回錯誤
+                return "串流生成失敗，請重新嘗試", "錯誤"
+            
+                
+        except Exception as e:
+            # 檢查錯誤類型
+            error_str = str(e).lower()
+            
+            # 處理提示被封鎖的錯誤
+            if "blocked" in error_str or "safety" in error_str or "harm" in error_str:
+                return f"Gemini API 錯誤: 提示被封鎖 - {str(e)}", "錯誤"
+            
+            # 處理生成中止的錯誤 
+            elif "stop" in error_str or "candidate" in error_str or "cancel" in error_str:
+                return f"Gemini API 錯誤: 回應生成中止 - {str(e)}", "錯誤"
+            
+            # 處理連接錯誤
+            elif isinstance(e, requests.exceptions.ConnectionError):
+                # 連接錯誤，可以重試
+                retry_count += 1
+                if retry_count >= max_retries:
+                    return f"Gemini API 連接錯誤，已重試 {max_retries} 次: {str(e)}", "錯誤"
+            
+            # 處理超時錯誤
+            elif isinstance(e, requests.exceptions.Timeout):
+                # 超時錯誤，可以重試
+                retry_count += 1
+                if retry_count >= max_retries:
+                    return f"Gemini API 超時，已重試 {max_retries} 次: {str(e)}", "錯誤"
+            
+            # 處理其他錯誤
+            elif "iterations" in error_str or "object is not iterable" in error_str:
+                # 改用非串流模式
+                use_non_streaming = True
+                continue
+            elif any(keyword in error_str for keyword in ["overloaded", "capacity", "rate limit", "too many requests"]):
+                # 可能是過載錯誤，可以重試
+                retry_count += 1
+                if retry_count >= max_retries:
+                    return f"Gemini API 過載，已重試 {max_retries} 次: {str(e)}", "錯誤"
+            else:
+                # 其他未知錯誤，嘗試非串流模式
+                if not use_non_streaming:
+                    use_non_streaming = True
+                    continue
+                else:
+                    # 非串流模式也失敗
+                    return f"Gemini API 錯誤: {str(e)}", "錯誤"
+    
+    # 如果所有重試都失敗
+    return "所有重試都失敗，Gemini API 目前可能不可用", "錯誤"
+
 def generate_deepseek_response(messages, model_id):
     """直接使用 DeepSeek API 生成回答，支援串流模式"""
     deepseek_api_key = get_env_variable("DEEPSEEK_API_KEY", "")
@@ -175,7 +293,6 @@ def generate_deepseek_response(messages, model_id):
         max_tokens_mapping = {
             "deepseek-chat": 8000
         }
-        # 獲取該模型的 max_tokens，如果沒找到則默認為 10000
         max_tokens = max_tokens_mapping.get(model_id, 8000)
         
         # 構建請求體

@@ -10,7 +10,8 @@ from utils.knowledge import search_knowledge, extract_core_question_with_llm
 from utils.llm_providers import (
     generate_openai_response, 
     generate_claude_response, 
-    generate_deepseek_response
+    generate_deepseek_response,
+    generate_gemini_response
 )
 
 # 設置頁面配置和標題
@@ -137,8 +138,10 @@ def generate_answer(query, context, update_status):
         # 生成回答
         return generate_response(messages)
     except Exception as e:
-        update_status(f"生成回答時發生錯誤: {str(e)}")
-        return None
+        error_message = f"生成回答時發生錯誤: {str(e)}"
+        update_status(error_message)
+        # 返回錯誤消息，而不是 None
+        return [error_message, "錯誤"]
 
 def generate_response(messages):
     """根據選定的LLM供應商生成回答"""
@@ -166,8 +169,21 @@ def generate_response(messages):
             model_id=deepseek_model
         )
         return response, "串流"
+    elif llm_provider == "gemini":
+        gemini_model = get_env_variable("GEMINI_MODEL", "gemini-2.0-flash")
+        response, _ = generate_gemini_response(
+            messages=messages,
+            model=gemini_model
+        )
+        return response, "串流"
     else:
-        return "未支援的 LLM 供應商"
+        # 預設使用 Claude
+        claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")
+        response, _ = generate_claude_response(
+            messages=messages,
+            model=claude_model
+        )
+        return response, "串流"
 
 
 def display_streaming_response(stream_response, message_placeholder):
@@ -175,7 +191,7 @@ def display_streaming_response(stream_response, message_placeholder):
     full_response = ""
     llm_provider = st.session_state.llm_provider
     
-    # 檢查是否是字符串(錯誤信息)
+    # 檢查是否是字符串(錯誤信息或非串流回應)
     if isinstance(stream_response, str):
         message_placeholder.markdown(stream_response)
         return stream_response
@@ -330,6 +346,148 @@ def display_streaming_response(stream_response, message_placeholder):
             message_placeholder.markdown(str(stream_response))
             return str(stream_response)
     
+    elif llm_provider == "gemini":
+        # 處理 Gemini 串流
+        try:
+            # 檢查是否為字符串或錯誤消息
+            if isinstance(stream_response, str):
+                processed_content = render_mermaid_diagrams(stream_response)
+                if "<MERMAID_CHART>" in processed_content:
+                    # 如果包含圖表，需要特殊處理
+                    message_placeholder.empty()
+                    with message_placeholder.container():
+                        parts = processed_content.split("<MERMAID_CHART>")
+                        for i, part in enumerate(parts):
+                            if i == 0:
+                                if part:
+                                    st.markdown(part, unsafe_allow_html=True)
+                            else:
+                                chart_end = part.find("</MERMAID_CHART>")
+                                if chart_end != -1:
+                                    chart_code = part[:chart_end]
+                                    remaining_text = part[chart_end + 16:]
+                                    try:
+                                        st_mermaid(chart_code, height=350)
+                                    except Exception as e:
+                                        st.error(f"圖表渲染失敗: {str(e)}")
+                                        st.code(chart_code, language="mermaid")
+                                    if remaining_text:
+                                        st.markdown(remaining_text, unsafe_allow_html=True)
+                else:
+                    # 普通文本，直接顯示
+                    message_placeholder.markdown(stream_response)
+                return stream_response
+                
+            # 檢查是否為生成器對象
+            if not hasattr(stream_response, '__iter__') or not callable(stream_response.__iter__):
+                error_msg = f"無法處理 Gemini 響應：收到非流式響應對象 ({type(stream_response).__name__})"
+                message_placeholder.markdown(error_msg)
+                return error_msg
+                
+            # 安全檢查
+            max_chunk_count = 1000  # 最大允許的chunk數量
+            chunk_count = 0
+            max_time_without_update = 30  # 最大不更新時間限制（秒）
+            import time
+            last_update_time = time.time()
+                
+            for chunk in stream_response:
+                # 安全檢查
+                chunk_count += 1
+                if chunk_count > max_chunk_count:
+                    full_response += "\n\n[Gemini 回應長，已經被截斷]"
+                    message_placeholder.markdown(full_response)
+                    break
+                    
+                # 更新時間檢查
+                current_time = time.time()
+                if current_time - last_update_time > max_time_without_update:
+                    full_response += "\n\n[Gemini 回應超時，已經自動停止]"
+                    message_placeholder.markdown(full_response)
+                    break
+                
+                content = None
+                # 處理 Gemini API 的不同響應格式
+                if hasattr(chunk, 'text'):
+                    content = chunk.text
+                elif hasattr(chunk, 'parts'):
+                    for part in chunk.parts:
+                        if hasattr(part, 'text') and part.text:
+                            content = part.text
+                elif hasattr(chunk, 'candidates') and chunk.candidates:
+                    for candidate in chunk.candidates:
+                        if hasattr(candidate, 'content') and candidate.content:
+                            if hasattr(candidate.content, 'parts'):
+                                for part in candidate.content.parts:
+                                    if hasattr(part, 'text') and part.text:
+                                        content = part.text
+                
+                # 如果成功提取到內容，則更新顯示
+                if content:
+                    last_update_time = time.time()  # 更新時間戳
+                    full_response += content
+                    processed_content = render_mermaid_diagrams(full_response)
+                    if "<MERMAID_CHART>" in processed_content:
+                        # 重新渲染整個內容，包括圖表
+                        message_placeholder.empty()
+                        with message_placeholder.container():
+                            parts = processed_content.split("<MERMAID_CHART>")
+                            for i, part in enumerate(parts):
+                                if i == 0:
+                                    # 第一部分是純文本
+                                    if part:
+                                        st.markdown(part, unsafe_allow_html=True)
+                                else:
+                                    # 查找圖表代碼和後續文本
+                                    chart_end = part.find("</MERMAID_CHART>")
+                                    if chart_end != -1:
+                                        chart_code = part[:chart_end]
+                                        remaining_text = part[chart_end + 16:]  # 16是</MERMAID_CHART>的長度
+                                        
+                                        # 渲染圖表
+                                        try:
+                                            st_mermaid(chart_code, height=350)
+                                        except Exception as e:
+                                            st.error(f"圖表渲染失敗: {str(e)}")
+                                            st.code(chart_code, language="mermaid")
+                                        
+                                        # 渲染剩餘文本
+                                        if remaining_text:
+                                            st.markdown(remaining_text, unsafe_allow_html=True)
+                    else:
+                        # 普通文本，直接更新
+                        message_placeholder.markdown(full_response)
+        except Exception as e:
+            # 捕獲所有可能的錯誤
+            error_msg = f"Gemini 串流處理發生錯誤: {str(e)}"
+            message_placeholder.markdown(error_msg)
+            
+            # 如果錯誤是因為收到了意外的響應格式
+            if "object is not iterable" in str(e) or "object is not an iterator" in str(e):
+                message_placeholder.markdown("收到的 Gemini 響應不是可迭代的串流格式，請稍後再試")
+                
+            # 最後嘗試顯示原始響應（如果可能）
+            if isinstance(stream_response, str):
+                return stream_response
+            else:
+                try:
+                    # 嘗試提取有用信息
+                    response_info = "無法解析響應"
+                    if hasattr(stream_response, 'text'):
+                        response_info = stream_response.text
+                    elif hasattr(stream_response, 'candidates') and stream_response.candidates:
+                        candidate = stream_response.candidates[0]
+                        if hasattr(candidate, 'content') and candidate.content:
+                            if hasattr(candidate.content, 'parts'):
+                                part = candidate.content.parts[0]
+                                if hasattr(part, 'text'):
+                                    response_info = part.text
+                    
+                    message_placeholder.markdown(response_info)
+                    return response_info
+                except:
+                    return error_msg
+    
     return full_response
 
 
@@ -410,6 +568,14 @@ if prompt:
     if st.session_state.supabase and voyage_api_key:
         context = search_knowledge_base(prompt, update_status)
         response_result = generate_answer(prompt, context, update_status)
+    
+    # 檢查 response_result 是否為 None 或無效
+    if response_result is None:
+        with st.chat_message("assistant"):
+            st.error("生成回答時發生錯誤，請重新嘗試或聯繫管理員")
+        # 添加錯誤消息到聊天記錄
+        st.session_state.messages.append({"role": "assistant", "content": "生成回答時發生錯誤，請重新嘗試"})
+        st.rerun()
     
     stream_response = response_result[0]
     is_streaming = True
