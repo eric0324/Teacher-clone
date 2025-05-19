@@ -11,7 +11,8 @@ from utils.knowledge import search_knowledge, extract_core_question_with_llm
 from utils.llm_providers import (
     generate_openai_response, 
     generate_claude_response, 
-    generate_deepseek_response
+    generate_deepseek_response,
+    save_question_to_supabase
 )
 
 # 設置頁面配置和標題 - 移除側邊欄配置
@@ -100,34 +101,7 @@ if "status_history" not in st.session_state:
 # 顯示聊天歷史
 display_chat_history()
 
-# 儲存用戶提問到 Supabase
-def save_question_to_supabase(question, prompt_name, knowledge_table):
-    """將用戶提問記錄儲存到 Supabase"""
-    try:
-        supabase = st.session_state.supabase
-        if supabase:
-            # 準備要插入的數據
-            question_data = {
-                "question": question,
-                "prompt_name": prompt_name,
-                "knowledge_table": knowledge_table,
-                "llm_provider": st.session_state.llm_provider,
-                "created_at": datetime.datetime.now().isoformat()
-            }
-            
-            # 插入數據到 question_logs 表
-            result = supabase.table("question_logs").insert(question_data).execute()
-            
-            # 檢查結果
-            if result and hasattr(result, 'data') and result.data:
-                return True
-            else:
-                print("插入問題記錄失敗")
-                return False
-        return False
-    except Exception as e:
-        print(f"儲存問題到 Supabase 時出錯: {str(e)}")
-        return False
+# 儲存功能已移至 utils.llm_providers 模組
 
 # 搜索知識庫
 def search_knowledge_base(query, update_status):
@@ -577,13 +551,6 @@ if prompt:
     with st.chat_message("user"):
         st.write(prompt)
     
-    # 儲存用戶提問到 Supabase
-    save_question_to_supabase(
-        question=prompt,
-        prompt_name=st.session_state.prompt_name,
-        knowledge_table=st.session_state.knowledge_table
-    )
-    
     # 創建一個固定位置的狀態訊息
     status_msg = st.empty()
     
@@ -650,6 +617,14 @@ if prompt:
     
     # 添加助手消息到聊天記錄
     st.session_state.messages.append({"role": "assistant", "content": response_text})
+    
+    # 儲存問題和回答到 Supabase
+    save_question_to_supabase(
+        question=prompt,
+        answer=response_text,
+        prompt_name=st.session_state.prompt_name,
+        knowledge_table=st.session_state.knowledge_table
+    )
     
     # 重新載入頁面以重置聊天界面
     st.rerun() 

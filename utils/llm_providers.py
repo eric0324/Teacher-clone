@@ -3,6 +3,8 @@ import openai
 from anthropic import Anthropic
 from anthropic._exceptions import APIStatusError
 from utils.config import get_env_variable
+import datetime
+import streamlit as st
 
 def generate_openai_response(messages, model):
     """使用 OpenAI API 生成回答，支援串流和非串流模式"""
@@ -205,3 +207,27 @@ def generate_deepseek_response(messages, model_id):
         return f"請求 DeepSeek API 時發生錯誤: {str(e)}", "錯誤"
     except Exception as e:
         return f"生成回答時發生錯誤: {str(e)}", "錯誤" 
+
+def save_question_to_supabase(question, answer, prompt_name, knowledge_table):
+    """將用戶提問和回答記錄儲存到 Supabase"""
+    try:
+        supabase = st.session_state.supabase
+        if supabase:
+            question_data = {
+                "question": question,
+                "answer": answer,  # 新增回答
+                "prompt_name": prompt_name,
+                "knowledge_table": knowledge_table,
+                "llm_provider": st.session_state.llm_provider,
+                "created_at": datetime.datetime.now().isoformat()
+            }
+            result = supabase.table("question_logs").insert(question_data).execute()
+            if result and hasattr(result, 'data') and result.data:
+                return True
+            else:
+                print("插入問題記錄失敗")
+                return False
+        return False
+    except Exception as e:
+        print(f"儲存問題到 Supabase 時出錯: {str(e)}")
+        return False

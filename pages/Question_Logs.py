@@ -116,6 +116,7 @@ if filtered_records:
         data.append({
             "時間": format_datetime(record.get('created_at', '')),
             "問題": record.get('question', ''),
+            "回答": record.get('answer', ''),
             "提示詞": record.get('prompt_name', ''),
             "知識庫": record.get('knowledge_table', ''),
             "模型": record.get('llm_provider', '')
