@@ -109,8 +109,9 @@ if selected_knowledge != "全部":
 # 顯示記錄
 st.subheader(f"找到 {len(filtered_records)} 條記錄")
 
-# 創建表格
+# 創建自定義表格顯示
 if filtered_records:
+    # 將數據結構化為表格形式
     data = []
     for record in filtered_records:
         data.append({
@@ -122,7 +123,63 @@ if filtered_records:
             "模型": record.get('llm_provider', '')
         })
     
-    st.table(data)
+    # 添加一些自定義樣式
+    st.markdown("""
+    <style>
+    .record-card {
+        background-color: #f8f9fa;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 15px;
+        border: 1px solid #e0e0e0;
+    }
+    .record-header {
+        margin-bottom: 10px;
+    }
+    .expander-content {
+        background-color: white;
+        border-radius: 5px;
+        padding: 10px;
+        margin-top: 5px;
+        border: 1px solid #eee;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # 逐筆顯示記錄
+    for i, item in enumerate(data):
+        st.markdown(f"""
+        <div class="record-card">
+            <div class="record-header">
+                <strong>時間:</strong> {item["時間"]} | 
+                <strong>提示詞:</strong> {item["提示詞"]} | 
+                <strong>知識庫:</strong> {item["知識庫"]} | 
+                <strong>模型:</strong> {item["模型"]}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 問題部分 - 可收合
+            question = item["問題"] or ""
+            if len(question) > 30:
+                with st.expander(f"**問題:** {question[:30]}...", expanded=False):
+                    st.markdown(f'<div class="expander-content">{question}</div>', unsafe_allow_html=True)
+            else:
+                st.write(f"**問題:** {question}")
+        
+        with col2:
+            # 回答部分 - 可收合
+            answer = item["回答"] or ""
+            if len(answer) > 30:
+                with st.expander(f"**回答:** {answer[:30]}...", expanded=False):
+                    st.markdown(f'<div class="expander-content">{answer}</div>', unsafe_allow_html=True)
+            else:
+                st.write(f"**回答:** {answer}")
+        
+        st.markdown("---")
 else:
     st.info("沒有符合過濾條件的記錄。")
 
