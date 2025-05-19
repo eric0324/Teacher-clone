@@ -11,8 +11,7 @@ from utils.knowledge import search_knowledge, extract_core_question_with_llm
 from utils.llm_providers import (
     generate_openai_response, 
     generate_claude_response, 
-    generate_deepseek_response,
-    generate_gemini_response
+    generate_deepseek_response
 )
 
 # 設置頁面配置和標題 - 移除側邊欄配置
@@ -225,13 +224,6 @@ def generate_response(messages):
         response, _ = generate_deepseek_response(
             messages=messages,
             model_id=deepseek_model
-        )
-        return response, "串流"
-    elif llm_provider == "gemini":
-        gemini_model = get_env_variable("GEMINI_MODEL", "gemini-2.0-flash")
-        response, _ = generate_gemini_response(
-            messages=messages,
-            model=gemini_model
         )
         return response, "串流"
     else:
