@@ -2,9 +2,68 @@ import streamlit as st
 import datetime
 from utils.config import load_config, get_env_variable
 from utils.auth import check_password
+from utils.ui import setup_ui
 
 # 設置頁面配置和標題
 st.set_page_config(page_title="問題記錄查詢", layout="wide", page_icon="📊")
+
+# 強制白底黑字主題
+st.markdown("""
+<style>
+    /* 強制整個應用用白底黑字 */
+    .stApp {
+        background-color: white !important;
+    }
+    [data-testid="stAppViewContainer"] {
+        background-color: white !important;
+    }
+    .main {
+        background-color: white !important;
+        color: black !important;
+    }
+    .st-emotion-cache-uf99v8 {
+        background-color: white !important;
+    }
+    .block-container {
+        background-color: white !important;
+    }
+    [data-testid="stExpander"] {
+        background-color: white !important;
+    }
+    .st-emotion-cache-1gulkj5 {
+        background-color: white !important;
+    }
+    div, span, p, h1, h2, h3, h4, h5, h6 {
+        color: black !important;
+    }
+    button {
+        background-color: #f0f2f6 !important;
+        color: black !important;
+    }
+    .st-bu, .st-bv, .st-bw, .st-bx {
+        background-color: white !important;
+    }
+    .streamlit-expanderHeader {
+        background-color: #f0f2f6 !important;
+        color: black !important;
+    }
+    .streamlit-expanderContent {
+        background-color: white !important;
+    }
+    /* 覆蓋所有文字顏色 */
+    * {
+        color: black !important;
+    }
+    /* 確保表格與卡片背景白色 */
+    .record-card, .record-header, .expander-content {
+        background-color: white !important;
+        color: black !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# 應用基本 UI 設置
+setup_ui()
 
 # 只隱藏側邊欄和收起箭頭，不影響主要內容
 st.markdown("""
