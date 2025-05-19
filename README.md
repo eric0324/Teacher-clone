@@ -115,3 +115,49 @@ $$;
 - **LLM整合**: OpenAI API
 - **向量數據庫**: Supabase + pgvector
 - **向量嵌入**: Voyage AI 
+
+## 問題記錄功能 (管理員專用)
+
+系統會自動記錄用戶的每次提問，並存儲以下信息：
+- 用戶問題
+- 使用的系統提示詞名稱
+- 使用的知識庫名稱
+- 使用的LLM供應商
+- 提問時間
+
+### 設置方法
+
+1. 在 Supabase 中執行以下 SQL 腳本創建記錄表：
+
+```sql
+-- 創建問題記錄表
+CREATE TABLE IF NOT EXISTS question_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  question TEXT NOT NULL,
+  prompt_name TEXT,
+  knowledge_table TEXT,
+  llm_provider TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 創建時間索引以加快查詢速度
+CREATE INDEX IF NOT EXISTS idx_question_logs_created_at 
+ON question_logs (created_at DESC);
+```
+
+2. 確保應用已連接到 Supabase
+
+### 查看記錄 (僅限管理員)
+
+問題記錄頁面**僅**能通過特定URL路徑訪問，主應用界面中沒有任何入口：
+
+```
+http://localhost:8501/Question_Logs
+```
+
+管理頁面功能：
+- 顯示最近100條提問記錄
+- 按提示詞名稱和知識庫名稱進行過濾
+- 記錄按時間倒序排列
+
+**注意**：此頁面不應向一般用戶提供，僅作為管理用途使用。 

@@ -1,10 +1,11 @@
 import streamlit as st
 import json
+import datetime
 from streamlit_mermaid import st_mermaid
 
 # 導入自定義模塊
 from utils.config import load_config, get_env_variable, load_system_prompt
-from utils.ui import setup_ui, setup_sidebar, display_chat_history, render_mermaid_diagrams
+from utils.ui import setup_ui, display_chat_history, render_mermaid_diagrams
 from utils.auth import check_password
 from utils.knowledge import search_knowledge, extract_core_question_with_llm
 from utils.llm_providers import (
@@ -14,8 +15,81 @@ from utils.llm_providers import (
     generate_gemini_response
 )
 
-# 設置頁面配置和標題
-st.set_page_config(page_title="數位分身系統", layout="wide", initial_sidebar_state="collapsed")
+# 設置頁面配置和標題 - 移除側邊欄配置
+st.set_page_config(page_title="數位分身系統", layout="wide")
+
+# 完全隱藏側邊欄和所有收起箭頭
+st.markdown("""
+<style>
+    /* 通用隱藏規則 - 直接隱藏整個頂部欄位避免所有按鈕 */
+    header[data-testid="stHeader"] {
+        display: none !important;
+    }
+
+    /* 隱藏側邊欄 */
+    [data-testid="stSidebar"], aside.st-emotion-cache-16txtl3, aside.st-emotion-cache-4oy321 {
+        display: none !important;
+        width: 0px !important;
+        height: 0px !important;
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        visibility: hidden !important;
+        z-index: -1 !important;
+        overflow: hidden !important;
+        opacity: 0 !important;
+    }
+    
+    /* 隱藏側邊欄控制元素 */
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="stSidebarNav"], 
+    div:has([data-testid="stSidebarCollapsedControl"]),
+    section[data-testid="stSidebarContent"] {
+        display: none !important;
+        width: 0px !important;
+        height: 0px !important;
+        position: absolute !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+    }
+    
+    /* 徹底隱藏所有按鈕和圖標 */
+    button[kind="headerNoPadding"], 
+    button[data-testid="baseButton-headerNoPadding"],
+    button.st-emotion-cache-1w7bu1y, 
+    .st-emotion-cache-169dgwr,
+    .st-emotion-cache-gsulwm,
+    div.st-emotion-cache-gsulwm,
+    .edtmxes14,
+    div[data-testid="stDecoration"],
+    div.st-emotion-cache-16j9m0,
+    div.st-emotion-cache-16j9m1 {
+        display: none !important;
+        width: 0px !important;
+        height: 0px !important;
+        position: absolute !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+    }
+    
+    /* 徹底隱藏所有SVG箭頭和圖標 */
+    svg, 
+    svg[class*="st-emotion"], 
+    svg path[d*="M10 6"] {
+        display: none !important;
+        width: 0px !important;
+        height: 0px !important;
+        position: absolute !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+    }
+    
+    /* 添加額外空間讓上方區域不顯得空蕩 */
+    .block-container {
+        padding-top: 1rem !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # 檢查登入狀態
 if not check_password():
@@ -56,9 +130,6 @@ st.session_state.supabase = config.get("supabase")
 if "custom_prompt" not in st.session_state:
     st.session_state.custom_prompt = load_system_prompt(st.session_state.prompt_name)
 
-# 設置側邊欄
-setup_sidebar()
-
 # 聊天界面部分
 st.subheader("數位分身聊天")
 
@@ -71,6 +142,35 @@ if "status_history" not in st.session_state:
 
 # 顯示聊天歷史
 display_chat_history()
+
+# 儲存用戶提問到 Supabase
+def save_question_to_supabase(question, prompt_name, knowledge_table):
+    """將用戶提問記錄儲存到 Supabase"""
+    try:
+        supabase = st.session_state.supabase
+        if supabase:
+            # 準備要插入的數據
+            question_data = {
+                "question": question,
+                "prompt_name": prompt_name,
+                "knowledge_table": knowledge_table,
+                "llm_provider": st.session_state.llm_provider,
+                "created_at": datetime.datetime.now().isoformat()
+            }
+            
+            # 插入數據到 question_logs 表
+            result = supabase.table("question_logs").insert(question_data).execute()
+            
+            # 檢查結果
+            if result and hasattr(result, 'data') and result.data:
+                return True
+            else:
+                print("插入問題記錄失敗")
+                return False
+        return False
+    except Exception as e:
+        print(f"儲存問題到 Supabase 時出錯: {str(e)}")
+        return False
 
 # 搜索知識庫
 def search_knowledge_base(query, update_status):
@@ -526,6 +626,13 @@ if prompt:
     # 立即顯示用戶訊息
     with st.chat_message("user"):
         st.write(prompt)
+    
+    # 儲存用戶提問到 Supabase
+    save_question_to_supabase(
+        question=prompt,
+        prompt_name=st.session_state.prompt_name,
+        knowledge_table=st.session_state.knowledge_table
+    )
     
     # 創建一個固定位置的狀態訊息
     status_msg = st.empty()
