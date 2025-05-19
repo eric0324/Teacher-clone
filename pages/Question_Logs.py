@@ -6,75 +6,33 @@ from utils.auth import check_password
 # 設置頁面配置和標題
 st.set_page_config(page_title="問題記錄查詢", layout="wide", page_icon="📊")
 
-# 完全隱藏側邊欄和所有收起箭頭
+# 只隱藏側邊欄和收起箭頭，不影響主要內容
 st.markdown("""
 <style>
-    /* 通用隱藏規則 - 直接隱藏整個頂部欄位避免所有按鈕 */
-    header[data-testid="stHeader"] {
-        display: none !important;
-    }
-
     /* 隱藏側邊欄 */
-    [data-testid="stSidebar"], aside.st-emotion-cache-16txtl3, aside.st-emotion-cache-4oy321 {
+    [data-testid="stSidebar"] {
         display: none !important;
         width: 0px !important;
-        height: 0px !important;
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        visibility: hidden !important;
-        z-index: -1 !important;
-        overflow: hidden !important;
-        opacity: 0 !important;
     }
     
-    /* 隱藏側邊欄控制元素 */
-    [data-testid="stSidebarCollapsedControl"],
-    [data-testid="stSidebarNav"], 
-    div:has([data-testid="stSidebarCollapsedControl"]),
-    section[data-testid="stSidebarContent"] {
+    /* 隱藏側邊欄控制按鈕 */
+    [data-testid="stSidebarCollapsedControl"] {
         display: none !important;
         width: 0px !important;
-        height: 0px !important;
-        position: absolute !important;
-        opacity: 0 !important;
-        visibility: hidden !important;
     }
     
-    /* 徹底隱藏所有按鈕和圖標 */
-    button[kind="headerNoPadding"], 
-    button[data-testid="baseButton-headerNoPadding"],
-    button.st-emotion-cache-1w7bu1y, 
-    .st-emotion-cache-169dgwr,
-    .st-emotion-cache-gsulwm,
+    /* 隱藏箭頭按鈕 */
+    section[data-testid="stSidebarContent"],
     div.st-emotion-cache-gsulwm,
-    .edtmxes14,
-    div[data-testid="stDecoration"],
-    div.st-emotion-cache-16j9m0,
-    div.st-emotion-cache-16j9m1 {
+    .st-emotion-cache-16j9m0,
+    button[kind="headerNoPadding"] {
         display: none !important;
-        width: 0px !important;
-        height: 0px !important;
-        position: absolute !important;
-        opacity: 0 !important;
-        visibility: hidden !important;
     }
     
-    /* 徹底隱藏所有SVG箭頭和圖標 */
-    svg, 
-    svg[class*="st-emotion"], 
-    svg path[d*="M10 6"] {
+    /* 只隱藏側邊欄的箭頭圖標，不影響其他SVG */
+    [data-testid="stSidebarCollapsedControl"] svg,
+    button[data-testid="baseButton-headerNoPadding"] svg {
         display: none !important;
-        width: 0px !important;
-        height: 0px !important;
-        position: absolute !important;
-        opacity: 0 !important;
-        visibility: hidden !important;
-    }
-    
-    /* 添加額外空間讓上方區域不顯得空蕩 */
-    .block-container {
-        padding-top: 1rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
