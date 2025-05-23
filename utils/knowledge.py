@@ -157,7 +157,7 @@ def extract_core_question_with_llm(query):
                     return {"core_question": query, "keywords": extract_keywords(query)}
                 
         elif llm_provider == "claude":
-            claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")
+            claude_model = get_env_variable("CLAUDE_MODEL", "claude-sonnet-4-20250514")
             response, response_type = generate_claude_response(
                 messages=messages,
                 model=claude_model

@@ -132,10 +132,10 @@ def setup_sidebar():
                 st.success(f"已切換到 {selected_openai_model} 模型")
         elif st.session_state.llm_provider == "claude":
             claude_models = [
-                "claude-3-7-sonnet-20250219",
+                "claude-sonnet-4-20250514",
                 "claude-3-5-sonnet-20241022",
             ]
-            claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")
+            claude_model = get_env_variable("CLAUDE_MODEL", "claude-sonnet-4-20250514")
             selected_claude_model = st.selectbox(
                 "選擇 Claude 模型", 
                 claude_models, 

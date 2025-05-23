@@ -80,7 +80,7 @@ def generate_claude_response(messages, model):
         return "Claude API 金鑰未設定", "配置錯誤"
     
     max_tokens_mapping = {
-        "claude-3-7-sonnet-20250219": 10000,
+        "claude-sonnet-4-20250514": 10000,
         "claude-3-5-sonnet-20241022": 8000,
     }
     

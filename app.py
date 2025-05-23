@@ -187,7 +187,7 @@ def generate_response(messages):
         )
         return response, "串流"
     elif llm_provider == "claude":
-        claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")
+        claude_model = get_env_variable("CLAUDE_MODEL", "claude-sonnet-4-20250514")
         response, _ = generate_claude_response(
             messages=messages,
             model=claude_model
@@ -202,7 +202,7 @@ def generate_response(messages):
         return response, "串流"
     else:
         # 預設使用 Claude
-        claude_model = get_env_variable("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")
+        claude_model = get_env_variable("CLAUDE_MODEL", "claude-sonnet-4-20250514")
         response, _ = generate_claude_response(
             messages=messages,
             model=claude_model
