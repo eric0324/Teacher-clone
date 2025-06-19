@@ -46,7 +46,48 @@ st.markdown("""
     button[data-testid="baseButton-headerNoPadding"] svg {
         display: none !important;
     }
+    
+    /* 將 PDF 上傳按鈕固定在底部 */
+    [data-testid="stFileUploader"] {
+        position: fixed !important;
+        bottom: 10px !important;
+        left: 50px !important;
+        right: 20px !important;
+        background: white !important;
+        padding: 10px 15px !important;
+        z-index: 999 !important;
+        width: auto !important;
+        max-width: 600px !important;
+        box-sizing: border-box !important;
+        margin: 0 !important;
+        border-radius: 8px !important;
+    }
+    
+    /* 調整聊天輸入框的位置，為 PDF 上傳按鈕騰出空間 */
+    [data-testid="stBottom"] {
+        margin-left: 100px !important;
+        bottom: 100px !important;
+        z-index: 1000 !important;
+    }
+    
+    /* 確保主要內容區域有足夠的底部間距 */
+    .stMainBlockContainer {
+        padding-bottom: 120px !important;
+    }
+    
+    /* PDF 上傳按鈕內部樣式調整 */
+    [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] {
+        min-height: 60px !important;
+        padding: 12px !important;
+        border-radius: 8px !important;
+    }
+    
+    [data-testid="stFileUploader"] label {
+        margin-bottom: 8px !important;
+    }
 </style>
+
+
 """, unsafe_allow_html=True)
 
 # 檢查登入狀態
@@ -528,6 +569,40 @@ prompt_from_suggestion = None
 if st.session_state.suggestion_prompt:
     prompt_from_suggestion = st.session_state.suggestion_prompt
     st.session_state.suggestion_prompt = None  # 清除建議問題，避免重複處理
+
+# PDF 檔案上傳按鈕 - 只有在沒有檔案時才顯示
+if "uploaded_file" not in st.session_state:
+    st.session_state.uploaded_file = None
+
+# 只有在沒有上傳檔案時才顯示上傳按鈕
+if st.session_state.uploaded_file is None:
+    uploaded_pdf = st.file_uploader(
+        "上傳 PDF 檔案", 
+        type=['pdf'],
+        help="支援上傳 PDF 檔案進行分析或問答"
+    )
+    
+    # 如果有檔案上傳，保存到 session state
+    if uploaded_pdf is not None:
+        st.session_state.uploaded_file = uploaded_pdf
+        st.rerun()
+else:
+    # 顯示已上傳的檔案信息和清除按鈕
+    uploaded_pdf = st.session_state.uploaded_file
+    
+    # 創建一個固定在底部的已上傳檔案顯示區域
+    st.markdown(f"""
+    <div style="position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); 
+                background: white; padding: 10px 15px; z-index: 1001; 
+                width: auto; max-width: 400px; box-sizing: border-box; 
+                border-radius: 8px; text-align: center;">
+        <div>
+            <span style="color: #28a745; font-weight: bold;">✓ 已上傳：</span>
+            <span style="color: #333;">{uploaded_pdf.name}</span>
+            <span style="color: #666; font-size: 0.9em;">({uploaded_pdf.size / 1024 / 1024:.1f} MB)</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # 輸入框 - 始終顯示輸入框
 prompt_from_input = st.chat_input("請輸入您的問題...")
