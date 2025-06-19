@@ -160,6 +160,13 @@ def generate_openai_response(messages, model):
         system_message = next((msg for msg in messages if msg["role"] == "system"), None)
         system_content = system_message["content"] if system_message else ""
         
+        # 檢查並截斷系統提示詞
+        if system_content:
+            max_system_chars = 50000  # 系統提示詞最大字符數限制
+            if len(system_content) > max_system_chars:
+                print(f"[WARNING] 系統提示詞過長 ({len(system_content)} 字符)，截斷到 {max_system_chars} 字符")
+                system_content = system_content[:max_system_chars] + "\n[系統提示詞已截斷]"
+        
         # 構建訊息格式
         formatted_messages = []
         
@@ -235,6 +242,13 @@ def generate_claude_response(messages, model, file_id=None):
         system_message = next((msg for msg in messages if msg["role"] == "system"), None)
         system_content = system_message["content"] if system_message else None
         
+        # 檢查並截斷系統提示詞
+        if system_content:
+            max_system_chars = 50000  # 系統提示詞最大字符數限制
+            if len(system_content) > max_system_chars:
+                print(f"[WARNING] 系統提示詞過長 ({len(system_content)} 字符)，截斷到 {max_system_chars} 字符")
+                system_content = system_content[:max_system_chars] + "\n[系統提示詞已截斷]"
+        
         # 從消息列表中移除系統消息
         filtered_messages = [msg for msg in messages if msg["role"] != "system"]
         
@@ -275,60 +289,85 @@ def generate_claude_response(messages, model, file_id=None):
         print(f"[DEBUG] 最終格式化的訊息數量: {len(formatted_messages)}")
         
         # 打印最終請求參數和內容長度分析
-        print(f"[DEBUG] ===== 準備呼叫 Claude API =====")
-        print(f"[DEBUG] 模型: {model}")
-        print(f"[DEBUG] 系統內容長度: {len(system_content) if system_content else 0} 字符")
-        print(f"[DEBUG] 溫度: {llm_temperature}")
-        print(f"[DEBUG] 最大 tokens: {max_tokens}")
-        print(f"[DEBUG] 串流模式: True")
-        
-        # 分析各部分內容長度
         print(f"[DEBUG] ===== 內容長度分析 =====")
         if system_content:
-            print(f"[DEBUG] 系統提示詞: {len(system_content)} 字符 (~{len(system_content)//4} tokens 估算)")
+            system_tokens = len(system_content) // 2.5
+            print(f"[DEBUG] 系統提示詞: {len(system_content)} 字符 (~{system_tokens:.0f} tokens 估算)")
+        else:
+            system_tokens = 0
+            print(f"[DEBUG] 系統提示詞: 無")
         
         total_message_chars = 0
+        total_message_tokens = 0
+        
         for i, msg in enumerate(formatted_messages):
             if isinstance(msg.get('content'), str):
                 char_count = len(msg['content'])
+                token_count = char_count // 2.5
                 total_message_chars += char_count
-                print(f"[DEBUG] 訊息 {i+1} ({msg['role']}): {char_count} 字符 (~{char_count//4} tokens 估算)")
+                total_message_tokens += token_count
+                print(f"[DEBUG] 訊息 {i+1} ({msg['role']}): {char_count} 字符 (~{token_count:.0f} tokens 估算)")
+                
+                # 如果訊息特別長，顯示前 100 字符以幫助調試
+                if char_count > 50000:
+                    print(f"[WARNING] 訊息 {i+1} 內容很長！前 100 字符: {msg['content'][:100]}...")
+                    
             elif isinstance(msg.get('content'), list):
                 total_blocks_chars = 0
+                total_blocks_tokens = 0
                 for j, block in enumerate(msg['content']):
                     if block.get('type') == 'text':
                         block_chars = len(block.get('text', ''))
+                        block_tokens = block_chars // 2.5
                         total_blocks_chars += block_chars
-                        print(f"[DEBUG] 訊息 {i+1} 文字塊 {j+1}: {block_chars} 字符 (~{block_chars//4} tokens 估算)")
+                        total_blocks_tokens += block_tokens
+                        print(f"[DEBUG] 訊息 {i+1} 文字塊 {j+1}: {block_chars} 字符 (~{block_tokens:.0f} tokens 估算)")
+                        
+                        # 如果文字塊特別長，顯示前 100 字符
+                        if block_chars > 50000:
+                            print(f"[WARNING] 訊息 {i+1} 文字塊 {j+1} 內容很長！前 100 字符: {block.get('text', '')[:100]}...")
+                            
                     elif block.get('type') == 'document':
                         print(f"[DEBUG] 訊息 {i+1} 檔案塊 {j+1}: 檔案 ID {block.get('source', {}).get('file_id', '未知')}")
+                        # 檔案的 token 消耗通常很大，特別是 PDF
+                        # 一個 50 頁的 PDF 可能消耗 100k-150k tokens
+                        estimated_file_tokens = 120000  # 更保守的估算
+                        total_blocks_tokens += estimated_file_tokens
+                        print(f"[WARNING] 檔案預估消耗 ~{estimated_file_tokens} tokens")
+                        
                 total_message_chars += total_blocks_chars
-                print(f"[DEBUG] 訊息 {i+1} ({msg['role']}) 總計: {total_blocks_chars} 字符 (~{total_blocks_chars//4} tokens 估算)")
+                total_message_tokens += total_blocks_tokens
+                print(f"[DEBUG] 訊息 {i+1} ({msg['role']}) 總計: {total_blocks_chars} 字符 (~{total_blocks_tokens:.0f} tokens 估算)")
         
         total_chars = (len(system_content) if system_content else 0) + total_message_chars
-        estimated_tokens = total_chars // 4  # 粗略估算
-        print(f"[DEBUG] ===== 總計估算 =====")
-        print(f"[DEBUG] 總字符數: {total_chars}")
-        print(f"[DEBUG] 估算 tokens: ~{estimated_tokens}")
-        print(f"[DEBUG] Claude 限制: 200,000 tokens")
+        estimated_tokens = system_tokens + total_message_tokens
         
-        if estimated_tokens > 180000:  # 預警閾值
+        print(f"[DEBUG] ===== 總計估算 =====")
+        print(f"[DEBUG] 系統提示詞 tokens: ~{system_tokens:.0f}")
+        print(f"[DEBUG] 訊息內容 tokens: ~{total_message_tokens:.0f}")
+        print(f"[DEBUG] 總字符數: {total_chars}")
+        print(f"[DEBUG] 估算 tokens: ~{estimated_tokens:.0f}")
+        print(f"[DEBUG] Claude 限制: 200,000 tokens")
+        print(f"[DEBUG] 實際 API 回報: 218,711 tokens (如果有的話)")
+        
+        # 更嚴格的限制：預留更多 buffer
+        if estimated_tokens > 150000:  # 降低預警閾值
             print(f"[WARNING] 估算 tokens 接近或超過限制！可能會被拒絕")
             
             # 提供建議
-            if total_message_chars > 150000:
+            if total_message_chars > 100000:  # 降低閾值
                 print(f"[WARNING] 訊息內容很長，可能需要：")
                 print(f"[WARNING] 1. 減少聊天歷史長度 (memory_length)")
                 print(f"[WARNING] 2. 檢查是否有超大的知識庫搜索結果")
                 print(f"[WARNING] 3. 檢查上傳的檔案是否過大")
             
-            if system_content and len(system_content) > 50000:
+            if system_content and len(system_content) > 30000:  # 降低閾值
                 print(f"[WARNING] 系統提示詞很長，考慮縮短")
                 
-            # 如果預估超過 200k tokens，直接返回錯誤而不嘗試呼叫 API
-            if estimated_tokens > 200000:
-                print(f"[ERROR] 預估 tokens ({estimated_tokens}) 超過 Claude 限制 (200,000)，停止呼叫 API")
-                return f"內容太長 (預估 {estimated_tokens} tokens)，超過 Claude 200k token 限制。請縮短內容或減少聊天歷史。", "錯誤"
+            # 如果預估超過 180k tokens，直接返回錯誤而不嘗試呼叫 API
+            if estimated_tokens > 180000:  # 更嚴格的限制
+                print(f"[ERROR] 預估 tokens ({estimated_tokens:.0f}) 超過安全限制 (180,000)，停止呼叫 API")
+                return f"內容太長 (預估 {estimated_tokens:.0f} tokens)，超過 Claude 安全限制。請縮短內容或減少聊天歷史。", "錯誤"
         
         # 如果有檔案，打印檔案相關信息
         if file_id:

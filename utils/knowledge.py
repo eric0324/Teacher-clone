@@ -260,7 +260,7 @@ def extract_core_question_with_llm(query):
             "keywords": extract_keywords(query)
         }
 
-def search_knowledge(query, match_threshold=0.7, match_count=10,):
+def search_knowledge(query, match_threshold=0.7, match_count=5):
     """從向量知識庫中搜索相關的知識點，使用多種策略提高命中率"""
     from utils.config import get_env_variable
     import streamlit as st

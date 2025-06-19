@@ -62,6 +62,8 @@ st.markdown("""
         box-sizing: border-box !important;
         margin: 0 !important;
         border-radius: 8px !important;
+        border: 1px solid #ddd !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
     }
     
     /* 調整聊天輸入框的位置，為 PDF 上傳按鈕騰出空間 */
@@ -117,7 +119,7 @@ if "use_streaming" not in st.session_state:
     st.session_state.use_streaming = True  # 預設啟用串流回應
 
 if "memory_length" not in st.session_state:
-    st.session_state.memory_length = 5
+    st.session_state.memory_length = 3  # 降低預設值從 5 到 3
     
 # 載入配置
 config = load_config()
@@ -131,6 +133,50 @@ if "custom_prompt" not in st.session_state:
 
 # 聊天界面部分
 st.subheader("數位分身聊天")
+
+# 添加緊急控制按鈕
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    if st.button("🗑️ 清除聊天歷史 (解決 Token 超限)", key="clear_chat_history"):
+        st.session_state.messages = []
+        st.success("聊天歷史已清除！這應該能解決 token 超限問題。")
+        st.rerun()
+
+# 添加 Token 診斷功能
+with st.expander("🔍 Token 使用診斷"):
+    if st.button("分析當前 Token 使用情況"):
+        # 計算各部分的 token 使用
+        system_prompt = st.session_state.custom_prompt or ""
+        system_tokens = len(system_prompt) / 2.5
+        
+        chat_history = st.session_state.messages[-st.session_state.memory_length*2:] if st.session_state.messages else []
+        history_chars = sum(len(msg.get('content', '')) for msg in chat_history)
+        history_tokens = history_chars / 2.5
+        
+        uploaded_file_id = st.session_state.get('uploaded_file_id', None)
+        file_tokens = 120000 if uploaded_file_id else 0
+        
+        total_estimated = system_tokens + history_tokens + file_tokens
+        
+        st.write("📊 **Token 使用分析：**")
+        st.write(f"- 系統提示詞：~{system_tokens:.0f} tokens ({len(system_prompt)} 字符)")
+        st.write(f"- 聊天歷史：~{history_tokens:.0f} tokens ({history_chars} 字符)")
+        st.write(f"- 上傳檔案：~{file_tokens} tokens")
+        st.write(f"- **總計估算：~{total_estimated:.0f} tokens**")
+        
+        if total_estimated > 180000:
+            st.error(f"⚠️ 預估 tokens ({total_estimated:.0f}) 超過安全限制！")
+            st.write("**建議解決方案：**")
+            if file_tokens > 0:
+                st.write("1. 清除上傳的檔案")
+            if history_tokens > 50000:
+                st.write("2. 清除聊天歷史")
+            if system_tokens > 20000:
+                st.write("3. 縮短系統提示詞")
+        elif total_estimated > 150000:
+            st.warning(f"⚠️ 預估 tokens ({total_estimated:.0f}) 接近限制")
+        else:
+            st.success(f"✅ Token 使用正常 ({total_estimated:.0f}/200000)")
 
 # 設置UI樣式
 setup_ui()
@@ -165,10 +211,17 @@ def search_knowledge_base(query, update_status):
             # 準備知識點信息
             knowledge_info = []
             total_knowledge_chars = 0
+            max_knowledge_chars = 200000  # 設定最大知識庫內容字符數限制
             
             for i, item in enumerate(knowledge_points):
                 match_info = f"({item.get('match_type', '未知匹配類型')}, 相似度: {item.get('similarity', 0):.2f})"
                 knowledge_text = f"概念: {item['concept']} {match_info}\n解釋: {item['explanation']}"
+                
+                # 檢查添加這個知識點是否會超過限制
+                if total_knowledge_chars + len(knowledge_text) > max_knowledge_chars:
+                    print(f"[WARNING] 知識庫內容達到限制，截斷在第 {i} 個知識點")
+                    break
+                
                 knowledge_info.append(knowledge_text)
                 
                 chars_count = len(knowledge_text)
@@ -177,9 +230,9 @@ def search_knowledge_base(query, update_status):
             
             # 將知識點整合為上下文
             context = "\n\n".join(knowledge_info)
-            print(f"[DEBUG] 知識庫上下文總長度: {len(context)} 字符 (~{len(context)//4} tokens 估算)")
+            print(f"[DEBUG] 知識庫上下文總長度: {len(context)} 字符 (~{len(context)//2.5:.0f} tokens 估算)")
             
-            if len(context) > 400000:  # 100k tokens 估算
+            if len(context) > 300000:  # 降低警告閾值
                 print(f"[WARNING] 知識庫內容很大，可能會導致 token 超限")
             
             return context
@@ -200,27 +253,14 @@ def generate_answer(query, context, update_status):
         system_content = st.session_state.custom_prompt
         
         # 獲取最近 memory_length 條對話歷史
-        chat_history = st.session_state.messages[-st.session_state.memory_length*2:] if len(st.session_state.messages) > 0 else []
+        # 檔案模式下為了避免 token 超限，暫時不使用聊天歷史
+        print(f"[WARNING] 檔案模式：為避免 token 超限，跳過聊天歷史")
+        chat_history = []  # 完全清空聊天歷史
         
-        print(f"[DEBUG] ===== 聊天歷史分析 =====")
-        print(f"[DEBUG] 記憶長度設定: {st.session_state.memory_length}")
-        print(f"[DEBUG] 總訊息數: {len(st.session_state.messages)}")
-        print(f"[DEBUG] 使用的歷史訊息數: {len(chat_history)}")
-        
-        total_history_chars = 0
-        for i, msg in enumerate(chat_history):
-            char_count = len(msg.get('content', ''))
-            total_history_chars += char_count
-            print(f"[DEBUG] 歷史訊息 {i+1} ({msg['role']}): {char_count} 字符")
-        
-        print(f"[DEBUG] 聊天歷史總字符數: {total_history_chars} (~{total_history_chars//4} tokens 估算)")
+        print(f"[DEBUG] 檔案模式聊天歷史總字符數: 0 (~0 tokens 估算)")
         
         # 構建消息
         messages = [{"role": "system", "content": system_content}]
-
-        # 添加歷史訊息
-        for message in chat_history:
-            messages.append(message)
 
         # 添加當前問題和上下文
         augmented_prompt = f"""
@@ -235,11 +275,11 @@ def generate_answer(query, context, update_status):
         
         messages.append({"role": "user", "content": augmented_prompt})
         
-        # 獲取檔案 ID（如果有上傳的檔案）
-        file_id = st.session_state.get('uploaded_file_id', None)
+        # RAG 模式不使用檔案，避免 token 消耗過大
+        print(f"[DEBUG] ===== RAG 模式，不使用檔案 =====")
         
-        # 生成回答
-        return generate_response(messages, file_id=file_id)
+        # 生成回答（RAG 模式不傳送檔案 ID）
+        return generate_response(messages, file_id=None)
     except Exception as e:
         error_message = f"生成回答時發生錯誤: {str(e)}"
         update_status(error_message)
@@ -610,9 +650,9 @@ if "uploaded_file" not in st.session_state:
 # 只有在沒有上傳檔案時才顯示上傳按鈕
 if st.session_state.uploaded_file is None:
     uploaded_pdf = st.file_uploader(
-        "上傳 PDF 檔案", 
+        "上傳 PDF 檔案進行對話",
         type=['pdf'],
-        help="支援上傳 PDF 檔案進行分析或問答"
+        help="支援 PDF 格式。檔案將自動上傳到 Anthropic 並可用於對話。"
     )
     
     # 如果有檔案上傳，保存到 session state 並上傳到 Anthropic
@@ -744,11 +784,45 @@ if prompt:
     
     # 使用知識庫或直接回答
     voyage_api_key = get_env_variable("VOYAGE_API_KEY", "")
-    if st.session_state.supabase and voyage_api_key:
+    uploaded_file_id = st.session_state.get('uploaded_file_id', None)
+    
+    # 修改邏輯：如果有檔案上傳，就不使用 RAG 搜索，避免 token 消耗過大
+    if uploaded_file_id:
+        # 有檔案上傳時，直接使用檔案進行對話，不搜索知識庫
+        update_status("正在分析您上傳的檔案並生成回答...")
+        try:
+            # 獲取系統提示詞
+            system_content = st.session_state.custom_prompt
+            
+            # 獲取最近 memory_length 條對話歷史
+            # 檔案模式下為了避免 token 超限，暫時不使用聊天歷史
+            print(f"[WARNING] 檔案模式：為避免 token 超限，跳過聊天歷史")
+            chat_history = []  # 完全清空聊天歷史
+            
+            print(f"[DEBUG] 檔案模式聊天歷史總字符數: 0 (~0 tokens 估算)")
+            
+            # 構建消息
+            messages = [{"role": "system", "content": system_content}]
+
+            # 添加當前問題
+            messages.append({"role": "user", "content": prompt})
+            
+            print(f"[DEBUG] ===== 使用檔案模式，跳過 RAG 搜索 =====")
+            print(f"[DEBUG] 檔案 ID: {uploaded_file_id}")
+            
+            # 生成回答
+            response_result = generate_response(messages, file_id=uploaded_file_id)
+        except Exception as e:
+            error_message = f"生成回答時發生錯誤: {str(e)}"
+            update_status(error_message)
+            response_result = [error_message, "錯誤"]
+    elif st.session_state.supabase and voyage_api_key:
+        # 沒有檔案上傳時，使用知識庫搜索
+        update_status("正在搜索知識庫...")
         context = search_knowledge_base(prompt, update_status)
         response_result = generate_answer(prompt, context, update_status)
     else:
-        # 直接使用 LLM 回答，沒有知識庫搜索
+        # 既沒有檔案也沒有知識庫，直接使用 LLM 回答
         update_status("正在生成回答...")
         try:
             # 獲取系統提示詞
@@ -756,6 +830,23 @@ if prompt:
             
             # 獲取最近 memory_length 條對話歷史
             chat_history = st.session_state.messages[-st.session_state.memory_length*2:] if len(st.session_state.messages) > 0 else []
+            
+            # 智能截斷聊天歷史，避免 token 超限
+            max_history_chars = 120000  # 一般對話模式的限制
+            total_history_chars = 0
+            filtered_chat_history = []
+            
+            # 從最新的訊息開始，向前添加到達限制為止
+            for msg in reversed(chat_history):
+                char_count = len(msg.get('content', ''))
+                if total_history_chars + char_count > max_history_chars:
+                    print(f"[WARNING] 一般對話模式：聊天歷史達到限制，截斷較早的訊息")
+                    break
+                filtered_chat_history.insert(0, msg)  # 插入到開頭保持順序
+                total_history_chars += char_count
+            
+            chat_history = filtered_chat_history
+            print(f"[DEBUG] 一般對話模式聊天歷史總字符數: {total_history_chars} (~{total_history_chars//2.5:.0f} tokens 估算)")
             
             # 構建消息
             messages = [{"role": "system", "content": system_content}]
@@ -767,14 +858,10 @@ if prompt:
             # 添加當前問題
             messages.append({"role": "user", "content": prompt})
             
-            # 獲取檔案 ID（如果有上傳的檔案）
-            file_id = st.session_state.get('uploaded_file_id', None)
-            print(f"[DEBUG] ===== 準備生成回答 =====")
-            print(f"[DEBUG] 使用的檔案 ID: {file_id}")
-            print(f"[DEBUG] LLM 提供者: {st.session_state.llm_provider}")
+            print(f"[DEBUG] ===== 一般對話模式 =====")
             
-            # 生成回答
-            response_result = generate_response(messages, file_id=file_id)
+            # 生成回答（不傳送檔案 ID）
+            response_result = generate_response(messages, file_id=None)
         except Exception as e:
             error_message = f"生成回答時發生錯誤: {str(e)}"
             update_status(error_message)
