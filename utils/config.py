@@ -47,7 +47,6 @@ def load_config():
         "voyage_model": get_env_variable("VOYAGE_MODEL", "voyage-2"),
         
         # 系統提示詞和知識庫設置
-        "prompt_filename": get_env_variable("PROMPT_FILENAME", "wang.txt"),
         "knowledge_table": get_env_variable("KNOWLEDGE_TABLE", "knowledge_base"),
         
         # 認證設置
@@ -81,7 +80,7 @@ def load_config():
             
     return config
 
-def load_system_prompt(prompt_name="wang"):
+def load_system_prompt(prompt_name="mj"):
     """從 system_prompts 資料表或資料夾載入系統提示詞"""
     import streamlit as st
     

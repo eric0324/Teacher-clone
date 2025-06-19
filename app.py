@@ -64,7 +64,7 @@ if "use_persona" not in st.session_state:
     st.session_state.use_persona = False
 
 if "prompt_name" not in st.session_state:
-    st.session_state.prompt_name = "wang"
+    st.session_state.prompt_name = "mj"
 
 if "knowledge_table" not in st.session_state:
     st.session_state.knowledge_table = get_env_variable("KNOWLEDGE_TABLE", "knowledge_base")  

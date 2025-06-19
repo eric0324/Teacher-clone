@@ -260,7 +260,7 @@ def extract_core_question_with_llm(query):
             "keywords": extract_keywords(query)
         }
 
-def search_knowledge(query, match_threshold=0.7, match_count=10, rpc_func="match_knowledge_wang"):
+def search_knowledge(query, match_threshold=0.7, match_count=10,):
     """從向量知識庫中搜索相關的知識點，使用多種策略提高命中率"""
     from utils.config import get_env_variable
     import streamlit as st
@@ -269,6 +269,12 @@ def search_knowledge(query, match_threshold=0.7, match_count=10, rpc_func="match
     supabase = st.session_state.get('supabase')
     if not supabase:
         st.error("Supabase 客戶端未初始化")
+        return []
+    
+    # 獲取知識表名稱
+    table_name = st.session_state.get('knowledge_table')
+    if not table_name:
+        st.error("知識表名稱未設定")
         return []
     
     # 提取核心問題和關鍵詞，增加搜索效果
@@ -396,11 +402,12 @@ def search_knowledge(query, match_threshold=0.7, match_count=10, rpc_func="match
         
         # 3. 使用向量搜索進行相似性搜索 - 使用核心問題的向量，更能捕捉語義
         result = supabase.rpc(
-            rpc_func, 
+            "vector_similarity_search", 
             {
                 "query_embedding": query_embedding,
                 "match_threshold": match_threshold,
-                "match_count": match_count
+                "match_count": match_count,
+                "table_name": table_name
             }
         ).execute()
         
@@ -414,11 +421,12 @@ def search_knowledge(query, match_threshold=0.7, match_count=10, rpc_func="match
         # 後續向量搜索降低閾值的部分保持不變
         if len(all_results) < max(3, match_count // 2) and match_threshold > 0.5:
             lower_threshold_result = supabase.rpc(
-                rpc_func, 
+                "vector_similarity_search", 
                 {
                     "query_embedding": query_embedding,
                     "match_threshold": 0.5,  # 降低閾值
-                    "match_count": match_count
+                    "match_count": match_count,
+                    "table_name": table_name
                 }
             ).execute()
             
@@ -431,11 +439,12 @@ def search_knowledge(query, match_threshold=0.7, match_count=10, rpc_func="match
         # 如果還是找不到足夠結果，再降低閾值到更低
         if len(all_results) < max(2, match_count // 3) and match_threshold > 0.3:
             lowest_threshold_result = supabase.rpc(
-                rpc_func, 
+                "vector_similarity_search", 
                 {
                     "query_embedding": query_embedding,
                     "match_threshold": 0.3,  # 極低閾值
-                    "match_count": match_count
+                    "match_count": match_count,
+                    "table_name": table_name
                 }
             ).execute()
             
