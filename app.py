@@ -134,50 +134,6 @@ if "custom_prompt" not in st.session_state:
 # 聊天界面部分
 st.subheader("數位分身聊天")
 
-# 添加緊急控制按鈕
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    if st.button("🗑️ 清除聊天歷史 (解決 Token 超限)", key="clear_chat_history"):
-        st.session_state.messages = []
-        st.success("聊天歷史已清除！這應該能解決 token 超限問題。")
-        st.rerun()
-
-# 添加 Token 診斷功能
-with st.expander("🔍 Token 使用診斷"):
-    if st.button("分析當前 Token 使用情況"):
-        # 計算各部分的 token 使用
-        system_prompt = st.session_state.custom_prompt or ""
-        system_tokens = len(system_prompt) / 2.5
-        
-        chat_history = st.session_state.messages[-st.session_state.memory_length*2:] if st.session_state.messages else []
-        history_chars = sum(len(msg.get('content', '')) for msg in chat_history)
-        history_tokens = history_chars / 2.5
-        
-        uploaded_file_id = st.session_state.get('uploaded_file_id', None)
-        file_tokens = 120000 if uploaded_file_id else 0
-        
-        total_estimated = system_tokens + history_tokens + file_tokens
-        
-        st.write("📊 **Token 使用分析：**")
-        st.write(f"- 系統提示詞：~{system_tokens:.0f} tokens ({len(system_prompt)} 字符)")
-        st.write(f"- 聊天歷史：~{history_tokens:.0f} tokens ({history_chars} 字符)")
-        st.write(f"- 上傳檔案：~{file_tokens} tokens")
-        st.write(f"- **總計估算：~{total_estimated:.0f} tokens**")
-        
-        if total_estimated > 180000:
-            st.error(f"⚠️ 預估 tokens ({total_estimated:.0f}) 超過安全限制！")
-            st.write("**建議解決方案：**")
-            if file_tokens > 0:
-                st.write("1. 清除上傳的檔案")
-            if history_tokens > 50000:
-                st.write("2. 清除聊天歷史")
-            if system_tokens > 20000:
-                st.write("3. 縮短系統提示詞")
-        elif total_estimated > 150000:
-            st.warning(f"⚠️ 預估 tokens ({total_estimated:.0f}) 接近限制")
-        else:
-            st.success(f"✅ Token 使用正常 ({total_estimated:.0f}/200000)")
-
 # 設置UI樣式
 setup_ui()
 
