@@ -12,7 +12,8 @@ from utils.llm_providers import (
     generate_openai_response, 
     generate_claude_response, 
     generate_deepseek_response,
-    save_question_to_supabase
+    save_question_to_supabase,
+    upload_file_to_anthropic
 )
 
 # 設置頁面配置和標題 - 移除側邊欄配置
@@ -65,7 +66,6 @@ st.markdown("""
     
     /* 調整聊天輸入框的位置，為 PDF 上傳按鈕騰出空間 */
     [data-testid="stBottom"] {
-        margin-left: 100px !important;
         bottom: 100px !important;
         z-index: 1000 !important;
     }
@@ -159,14 +159,29 @@ def search_knowledge_base(query, update_status):
             knowledge_points = search_knowledge(core_question)
             st.session_state.last_knowledge_points = knowledge_points
             
+            print(f"[DEBUG] ===== 知識庫搜索結果 =====")
+            print(f"[DEBUG] 找到 {len(knowledge_points)} 個知識點")
+            
             # 準備知識點信息
             knowledge_info = []
-            for item in knowledge_points:
+            total_knowledge_chars = 0
+            
+            for i, item in enumerate(knowledge_points):
                 match_info = f"({item.get('match_type', '未知匹配類型')}, 相似度: {item.get('similarity', 0):.2f})"
-                knowledge_info.append(f"概念: {item['concept']} {match_info}\n解釋: {item['explanation']}")
+                knowledge_text = f"概念: {item['concept']} {match_info}\n解釋: {item['explanation']}"
+                knowledge_info.append(knowledge_text)
+                
+                chars_count = len(knowledge_text)
+                total_knowledge_chars += chars_count
+                print(f"[DEBUG] 知識點 {i+1}: {chars_count} 字符")
             
             # 將知識點整合為上下文
             context = "\n\n".join(knowledge_info)
+            print(f"[DEBUG] 知識庫上下文總長度: {len(context)} 字符 (~{len(context)//4} tokens 估算)")
+            
+            if len(context) > 400000:  # 100k tokens 估算
+                print(f"[WARNING] 知識庫內容很大，可能會導致 token 超限")
+            
             return context
             
         except Exception as e:
@@ -186,6 +201,19 @@ def generate_answer(query, context, update_status):
         
         # 獲取最近 memory_length 條對話歷史
         chat_history = st.session_state.messages[-st.session_state.memory_length*2:] if len(st.session_state.messages) > 0 else []
+        
+        print(f"[DEBUG] ===== 聊天歷史分析 =====")
+        print(f"[DEBUG] 記憶長度設定: {st.session_state.memory_length}")
+        print(f"[DEBUG] 總訊息數: {len(st.session_state.messages)}")
+        print(f"[DEBUG] 使用的歷史訊息數: {len(chat_history)}")
+        
+        total_history_chars = 0
+        for i, msg in enumerate(chat_history):
+            char_count = len(msg.get('content', ''))
+            total_history_chars += char_count
+            print(f"[DEBUG] 歷史訊息 {i+1} ({msg['role']}): {char_count} 字符")
+        
+        print(f"[DEBUG] 聊天歷史總字符數: {total_history_chars} (~{total_history_chars//4} tokens 估算)")
         
         # 構建消息
         messages = [{"role": "system", "content": system_content}]
@@ -207,15 +235,18 @@ def generate_answer(query, context, update_status):
         
         messages.append({"role": "user", "content": augmented_prompt})
         
+        # 獲取檔案 ID（如果有上傳的檔案）
+        file_id = st.session_state.get('uploaded_file_id', None)
+        
         # 生成回答
-        return generate_response(messages)
+        return generate_response(messages, file_id=file_id)
     except Exception as e:
         error_message = f"生成回答時發生錯誤: {str(e)}"
         update_status(error_message)
         # 返回錯誤消息，而不是 None
         return [error_message, "錯誤"]
 
-def generate_response(messages):
+def generate_response(messages, file_id=None):
     """根據選定的LLM供應商生成回答"""
     llm_provider = st.session_state.llm_provider
     use_streaming = st.session_state.use_streaming
@@ -231,7 +262,8 @@ def generate_response(messages):
         claude_model = get_env_variable("CLAUDE_MODEL", "claude-sonnet-4-20250514")
         response, _ = generate_claude_response(
             messages=messages,
-            model=claude_model
+            model=claude_model,
+            file_id=file_id
         )
         return response, "串流"
     elif llm_provider == "deepseek":
@@ -246,7 +278,8 @@ def generate_response(messages):
         claude_model = get_env_variable("CLAUDE_MODEL", "claude-sonnet-4-20250514")
         response, _ = generate_claude_response(
             messages=messages,
-            model=claude_model
+            model=claude_model,
+            file_id=file_id
         )
         return response, "串流"
 
@@ -582,24 +615,71 @@ if st.session_state.uploaded_file is None:
         help="支援上傳 PDF 檔案進行分析或問答"
     )
     
-    # 如果有檔案上傳，保存到 session state
+    # 如果有檔案上傳，保存到 session state 並上傳到 Anthropic
     if uploaded_pdf is not None:
-        st.session_state.uploaded_file = uploaded_pdf
-        st.rerun()
+        print(f"[DEBUG] ===== 用戶上傳檔案 =====")
+        print(f"[DEBUG] 檔案名稱: {uploaded_pdf.name}")
+        print(f"[DEBUG] 檔案類型: {uploaded_pdf.type}")
+        print(f"[DEBUG] 檔案大小: {uploaded_pdf.size} bytes")
+        
+        with st.spinner("正在處理並上傳檔案到 Anthropic..."):
+            # 讀取檔案內容
+            file_content = uploaded_pdf.read()
+            print(f"[DEBUG] 已讀取檔案內容，大小: {len(file_content)} bytes")
+            
+            # 上傳到 Anthropic Files API
+            print(f"[DEBUG] 開始呼叫 upload_file_to_anthropic...")
+            file_id, error, page_info = upload_file_to_anthropic(file_content, uploaded_pdf.name)
+            
+            print(f"[DEBUG] 上傳結果:")
+            print(f"[DEBUG] - 檔案 ID: {file_id}")
+            print(f"[DEBUG] - 錯誤信息: {error}")
+            print(f"[DEBUG] - 頁數信息: {page_info}")
+            
+            if file_id:
+                st.session_state.uploaded_file = uploaded_pdf
+                st.session_state.uploaded_file_id = file_id
+                st.session_state.uploaded_file_page_info = page_info
+                
+                # 根據頁數信息顯示不同的成功訊息
+                if page_info and page_info.get('was_trimmed'):
+                    st.warning(f"檔案 {uploaded_pdf.name} 原有 {page_info['total_pages']} 頁，已自動裁切為前 50 頁並上傳成功！")
+                elif page_info and page_info.get('total_pages'):
+                    st.success(f"檔案 {uploaded_pdf.name} ({page_info['total_pages']} 頁) 上傳成功！")
+                else:
+                    st.success(f"檔案 {uploaded_pdf.name} 上傳成功！")
+                
+                st.rerun()
+            else:
+                st.error(f"檔案上傳失敗：{error}")
+                # 重置檔案上傳狀態
+                st.session_state.uploaded_file = None
+                if "uploaded_file_id" in st.session_state:
+                    del st.session_state.uploaded_file_id
 else:
     # 顯示已上傳的檔案信息和清除按鈕
     uploaded_pdf = st.session_state.uploaded_file
     
     # 創建一個固定在底部的已上傳檔案顯示區域
+    page_info = st.session_state.get('uploaded_file_page_info', {})
+    
+    # 構建頁數信息文字
+    page_text = ""
+    if page_info.get('total_pages'):
+        if page_info.get('was_trimmed'):
+            page_text = f" - 已裁切為前 50 頁 (原 {page_info['total_pages']} 頁)"
+        else:
+            page_text = f" - {page_info['total_pages']} 頁"
+    
     st.markdown(f"""
     <div style="position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); 
                 background: white; padding: 10px 15px; z-index: 1001; 
-                width: auto; max-width: 400px; box-sizing: border-box; 
+                width: auto; max-width: 500px; box-sizing: border-box; 
                 border-radius: 8px; text-align: center;">
         <div>
             <span style="color: #28a745; font-weight: bold;">✓ 已上傳：</span>
             <span style="color: #333;">{uploaded_pdf.name}</span>
-            <span style="color: #666; font-size: 0.9em;">({uploaded_pdf.size / 1024 / 1024:.1f} MB)</span>
+            <span style="color: #666; font-size: 0.9em;">({uploaded_pdf.size / 1024 / 1024:.1f} MB{page_text})</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -667,6 +747,38 @@ if prompt:
     if st.session_state.supabase and voyage_api_key:
         context = search_knowledge_base(prompt, update_status)
         response_result = generate_answer(prompt, context, update_status)
+    else:
+        # 直接使用 LLM 回答，沒有知識庫搜索
+        update_status("正在生成回答...")
+        try:
+            # 獲取系統提示詞
+            system_content = st.session_state.custom_prompt
+            
+            # 獲取最近 memory_length 條對話歷史
+            chat_history = st.session_state.messages[-st.session_state.memory_length*2:] if len(st.session_state.messages) > 0 else []
+            
+            # 構建消息
+            messages = [{"role": "system", "content": system_content}]
+
+            # 添加歷史訊息
+            for message in chat_history:
+                messages.append(message)
+
+            # 添加當前問題
+            messages.append({"role": "user", "content": prompt})
+            
+            # 獲取檔案 ID（如果有上傳的檔案）
+            file_id = st.session_state.get('uploaded_file_id', None)
+            print(f"[DEBUG] ===== 準備生成回答 =====")
+            print(f"[DEBUG] 使用的檔案 ID: {file_id}")
+            print(f"[DEBUG] LLM 提供者: {st.session_state.llm_provider}")
+            
+            # 生成回答
+            response_result = generate_response(messages, file_id=file_id)
+        except Exception as e:
+            error_message = f"生成回答時發生錯誤: {str(e)}"
+            update_status(error_message)
+            response_result = [error_message, "錯誤"]
     
     # 檢查 response_result 是否為 None 或無效
     if response_result is None:
